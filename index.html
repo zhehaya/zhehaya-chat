@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>zhehaya chat</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --fg: #3dff7c;
+      --fg-dim: #1d8a46;
+      --fg-faint: #144d2a;
+      --border: #2b2b2b;
+      --danger: #ff4d4d;
+      --warn: #ffb800;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", "Courier New", monospace;
+      background: var(--bg);
+      color: var(--fg);
+      overflow: hidden;
+    }
+
+    .hidden { display: none !important; }
+
+    .view {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ---------- 登录界面 ---------- */
+    #login-view { z-index: 2; }
+
+    .login-card {
+      width: min(420px, calc(100vw - 40px));
+      background: #0d0d0d;
+      border: 1px solid var(--border);
+      padding: 30px 32px 28px;
+      text-align: left;
+    }
+
+    .logo { font-size: 28px; margin-bottom: 16px; }
+    .login-card h1 { font-size: 24px; font-weight: 700; letter-spacing: 3px; }
+    .login-card .sub {
+      margin: 6px 0 24px;
+      font-size: 12px; color: var(--fg-dim); letter-spacing: 1px;
+    }
+
+    .field {
+      display: flex; align-items: center;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .field:focus-within { border-color: var(--fg); }
+    .field .icon { padding: 0 12px; font-size: 13px; color: var(--fg-dim); }
+    .field input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 12px 12px 0;
+      background: transparent;
+      border: none; outline: none;
+      color: var(--fg); font-size: 14px;
+      font-family: inherit; caret-color: var(--fg);
+    }
+    .field input::placeholder { color: var(--fg-faint); }
+
+    .btn {
+      width: 100%;
+      margin-top: 16px;
+      padding: 11px;
+      border: 1px solid var(--fg);
+      background: transparent;
+      color: var(--fg); font-size: 14px; letter-spacing: 2px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .btn:hover, .btn:active { background: var(--fg); color: #000; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .error-tip {
+      margin-top: 12px;
+      font-size: 13px; color: var(--danger);
+      animation: shake 0.35s ease;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+
+    .setup-hint {
+      margin-bottom: 18px;
+      padding: 10px 12px;
+      font-size: 12px; line-height: 1.7;
+      color: var(--warn);
+      background: rgba(255, 184, 0, 0.06);
+      border: 1px solid rgba(255, 184, 0, 0.35);
+    }
+
+    /* ---------- 聊天界面 ---------- */
+    #chat-view { flex-direction: column; z-index: 1; }
+
+    .chat-shell {
+      width: min(900px, calc(100vw - 24px));
+      height: min(88vh, 820px);
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+      background: #0d0d0d;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .chat-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .room-info { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .dot {
+      width: 8px; height: 8px;
+      background: var(--fg);
+      animation: blink 1.4s steps(2) infinite;
+    }
+    .dot.offline {
+      background: var(--warn);
+      animation: none;
+    }
+    @keyframes blink { 50% { opacity: 0.15; } }
+    .conn-text { font-size: 12px; color: var(--fg-dim); }
+    .online-box { font-size: 12px; color: var(--fg-dim); letter-spacing: 1px; }
+    .online-box b { color: var(--fg); font-size: 13px; }
+
+    .msg-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px 10px;
+      scroll-behavior: smooth;
+    }
+    .msg-list::-webkit-scrollbar { width: 8px; }
+    .msg-list::-webkit-scrollbar-thumb { background: #1f1f1f; }
+    .msg-list::-webkit-scrollbar-track { background: transparent; }
+
+    .msg {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 2px;
+      word-break: break-word;
+      animation: fadeInUp 0.15s ease both;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .msg .t { color: var(--fg-faint); }
+    .msg .n { color: var(--fg-dim); }
+    .msg .c { color: #d6ffe4; white-space: pre-wrap; }
+    .msg.me .t { color: var(--fg-dim); }
+    .msg.me .n { color: var(--fg); }
+    .msg.me .c { color: var(--fg); }
+
+    .sys-tip {
+      font-size: 12px;
+      color: var(--fg-dim);
+      margin: 6px 0 10px;
+    }
+
+    .chat-footer {
+      display: flex; gap: 10px;
+      padding: 12px 14px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .chat-footer input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      background: #000;
+      color: var(--fg);
+      font-size: 14px;
+      font-family: inherit; caret-color: var(--fg);
+      outline: none;
+    }
+    .chat-footer input:focus { border-color: var(--fg); }
+    .chat-footer input::placeholder { color: var(--fg-faint); }
+    .send-btn {
+      padding: 0 18px;
+      border: 1px solid var(--fg);
+      background: transparent;
+      color: var(--fg); font-size: 13px; letter-spacing: 1px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .send-btn:hover, .send-btn:active { background: var(--fg); color: #000; }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .jump-btn {
+      position: absolute;
+      left: 50%;
+      bottom: 84px;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      border: 1px solid var(--fg);
+      background: #000;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .jump-btn:hover { background: var(--fg); color: #000; }
+
+    @media (max-width: 640px) {
+      .chat-shell { width: 100vw; height: 100dvh; min-height: 0; border: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================= 登录界面 ================= -->
+  <div id="login-view" class="view">
+    <div class="login-card">
+      <div class="logo">&gt;_</div>
+      <h1>zhehaya chat</h1>
+      <p class="sub">TERMINAL ROOM // ANONYMOUS</p>
+
+      <div id="setup-hint" class="setup-hint hidden">
+        [!] 尚未配置 Supabase：请打开 <b>index.html</b>，
+        在顶部「配置区」填入你的 Supabase 地址与 anon key
+        （详见 README.md）。
+      </div>
+
+      <div class="field">
+        <span class="icon">&gt;</span>
+        <input id="password-input" type="password" placeholder="password" maxlength="32" autocomplete="off" />
+      </div>
+      <div id="login-error" class="error-tip hidden">* ACCESS DENIED — 密码错误</div>
+      <button id="login-btn" class="btn">[ ENTER ]</button>
+    </div>
+  </div>
+
+  <!-- ================= 聊天界面 ================= -->
+  <div id="chat-view" class="view hidden">
+    <div class="chat-shell">
+      <header class="chat-header">
+        <div class="room-info">
+          <span id="conn-dot" class="dot"></span>
+          <strong id="room-name">zhehaya chat</strong>
+          <span id="conn-text" class="conn-text">[LINK: ...]</span>
+        </div>
+        <div class="online-box">[ONLINE: <b id="online-count">0</b>]</div>
+      </header>
+
+      <main id="msg-list" class="msg-list"></main>
+
+      <button id="jump-btn" class="jump-btn hidden">[ NEW MSG ]</button>
+
+      <footer class="chat-footer">
+        <input id="message-input" type="text" placeholder="&gt; message... (Enter 发送)" maxlength="500" />
+        <button id="send-btn" class="send-btn">[SEND]</button>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    /* ==================================================================
+     *                      配 置 区（可随时修改）
+     * ================================================================== */
+    const SUPABASE_URL      = "https://bwcannjfisxpspmondbd.supabase.co"; // TODO: 换成你的 Supabase 项目 URL
+    const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
+    const ROOM_PASSWORD     = "123456";                           // 进入密码（改这里即可）
+    const ROOM_NAME         = "zhehaya chat";                    // 房间显示名称
+    const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
+    /* ================================================================== */
+
+    const IS_CONFIGURED =
+      SUPABASE_URL.startsWith("https://") &&
+      !SUPABASE_URL.includes("your-project") &&
+      SUPABASE_ANON_KEY !== "your-anon-key" &&
+      SUPABASE_ANON_KEY.length > 20;
+
+    const $ = (id) => document.getElementById(id);
+
+    /* ---------- 匿名身份 ---------- */
+    function genHandle() {
+      const b = crypto.getRandomValues(new Uint8Array(2));
+      return "guest_" + Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+    }
+
+    // 昵称存 localStorage，刷新后仍是同一个人
+    // （旧版本动物昵称不符合格式时，自动重新生成）
+    let myNickname = localStorage.getItem("anon-nickname");
+    if (!myNickname || !/^guest_[0-9a-f]{4}$/.test(myNickname)) {
+      myNickname = genHandle();
+      localStorage.setItem("anon-nickname", myNickname);
+    }
+    const MY_UID = crypto.randomUUID();
+
+    /* ---------- 登录 ---------- */
+    const loginView = $("login-view"), chatView = $("chat-view");
+    let sb = null, channel = null; // 注意：不能命名为 supabase，会与 SDK 全局变量冲突
+    const renderedIds = new Set();
+    let isNearBottom = true;
+    let sendLock = false;
+
+    // 若已配置且当前会话已通过验证，直接进入
+    if (sessionStorage.getItem("room-authed") === "1" && IS_CONFIGURED) {
+      enterRoom();
+    } else if (!IS_CONFIGURED) {
+      $("setup-hint").classList.remove("hidden");
+    }
+
+    function tryLogin() {
+      const pwd = $("password-input").value;
+      if (pwd === ROOM_PASSWORD) {
+        sessionStorage.setItem("room-authed", "1");
+        $("login-error").classList.add("hidden");
+        enterRoom();
+      } else {
+        $("login-error").classList.remove("hidden");
+        $("password-input").value = "";
+        $("password-input").focus();
+      }
+    }
+
+    $("login-btn").addEventListener("click", tryLogin);
+    $("password-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") tryLogin();
+    });
+
+    /* ---------- 进入房间 ---------- */
+    function enterRoom() {
+      loginView.classList.add("hidden");
+      chatView.classList.remove("hidden");
+      $("room-name").textContent = ROOM_NAME;
+      document.title = ROOM_NAME;
+      initSupabase();
+    }
+
+    function initSupabase() {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      channel = sb
+        .channel("anonymous-chat-room", { config: { presence: { key: MY_UID } } })
+        .on("presence", { event: "sync" }, updateOnlineCount)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "messages" },
+          (payload) => {
+            if (!renderedIds.has(payload.new.id)) renderMessage(payload.new);
+          }
+        )
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            setConn(true);
+            await channel.track({ online_at: new Date().toISOString() });
+            loadHistory();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            setConn(false, "[LINK: ERROR]");
+          }
+        });
+
+      $("send-btn").addEventListener("click", sendMessage);
+      $("message-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing) sendMessage();
+      });
+      const list = $("msg-list");
+      list.addEventListener("scroll", () => {
+        isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        if (isNearBottom) $("jump-btn").classList.add("hidden");
+      });
+      $("jump-btn").addEventListener("click", scrollToBottom);
+    }
+
+    function setConn(ok, text) {
+      $("conn-dot").classList.toggle("offline", !ok);
+      $("conn-text").textContent = text || (ok ? "[LINK: OK]" : "[LINK: DOWN]");
+    }
+
+    function updateOnlineCount() {
+      if (!channel) return;
+      $("online-count").textContent = Object.keys(channel.presenceState()).length;
+    }
+
+    /* ---------- 历史消息 ---------- */
+    async function loadHistory() {
+      const { data, error } = await sb
+        .from("messages")
+        .select("id, nickname, content, created_at")
+        .order("created_at", { ascending: false })
+        .limit(HISTORY_LIMIT);
+      if (error) {
+        addSysTip("-- [!] history load failed: " + error.message);
+        return;
+      }
+      if (data.length) {
+        addSysTip(`-- last ${data.length} messages --`);
+        data.reverse().forEach(renderMessage);
+      } else {
+        addSysTip("-- no messages yet --");
+      }
+      scrollToBottom();
+    }
+
+    /* ---------- 渲染消息 ---------- */
+    function renderMessage(msg) {
+      renderedIds.add(msg.id);
+      const list = $("msg-list");
+
+      const row = document.createElement("div");
+      row.className = "msg" + (msg.nickname === myNickname ? " me" : "");
+      row.dataset.id = msg.id;
+
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = "[" + formatTime(msg.created_at) + "] ";
+
+      const n = document.createElement("span");
+      n.className = "n";
+      n.textContent = (msg.nickname === myNickname ? "you" : msg.nickname) + "> ";
+
+      const c = document.createElement("span");
+      c.className = "c";
+      c.textContent = msg.content; // 用 textContent 防 XSS
+
+      row.append(t, n, c);
+      list.appendChild(row);
+
+      if (isNearBottom) scrollToBottom();
+      else $("jump-btn").classList.remove("hidden");
+    }
+
+    function addSysTip(text) {
+      const list = $("msg-list");
+      const tip = document.createElement("div");
+      tip.className = "sys-tip";
+      tip.textContent = text;
+      list.appendChild(tip);
+    }
+
+    function formatTime(iso) {
+      const d = new Date(iso);
+      const now = new Date();
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      if (d.toDateString() === now.toDateString()) return hh + ":" + mm;
+      return (d.getMonth() + 1) + "/" + d.getDate() + " " + hh + ":" + mm;
+    }
+
+    function scrollToBottom() {
+      const list = $("msg-list");
+      list.scrollTop = list.scrollHeight;
+    }
+
+    /* ---------- 发送消息 ---------- */
+    async function sendMessage() {
+      const input = $("message-input");
+      const content = input.value.trim();
+      if (!content || sendLock) return;
+      if (!sb) { addSysTip("-- [!] link not ready --"); return; }
+
+      sendLock = true;
+      $("send-btn").disabled = true;
+
+      const { data, error } = await sb
+        .from("messages")
+        .insert({ nickname: myNickname, content })
+        .select("id, nickname, content, created_at")
+        .single();
+
+      if (error) {
+        addSysTip("-- [!] send failed: " + error.message);
+      } else if (data) {
+        input.value = "";
+        renderMessage(data); // 本地立即显示，realtime 回传时按 id 去重
+      }
+
+      sendLock = false;
+      $("send-btn").disabled = false;
+      input.focus();
+    }
+
+    /* ---------- 关闭页面时上报离开 ---------- */
+    window.addEventListener("beforeunload", () => {
+      if (channel) sb.removeChannel(channel);
+    });
+  </script>
+</body>
+</html>
