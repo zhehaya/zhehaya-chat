@@ -258,6 +258,31 @@
 
     @media (max-width: 640px) {
       .chat-shell { width: 100vw; height: 100dvh; min-height: 0; border: none; }
+      /* 头部自适应：窄屏下功能区换行到第二行，避免开麦/离开按钮被挤出屏幕 */
+      .chat-header {
+        flex-wrap: wrap;
+        gap: 8px 10px;
+        padding: 10px 12px;
+      }
+      .room-info { min-width: 0; flex: 1 1 auto; }
+      #room-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .room-tag {
+        max-width: 28vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .conn-text { display: none; }
+      .header-right {
+        width: 100%;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .mic-btn, .leave-btn { padding: 6px 12px; font-size: 12px; }
     }
   </style>
 </head>
