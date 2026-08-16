@@ -325,10 +325,10 @@
       return "guest_" + Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
     }
 
-    // 昵称存 localStorage，刷新后仍是同一人；登录页可自定义
+    // 默认昵称为空：登录页不预填；留空登录则随机生成
+    // localStorage 中的昵称仅用于刷新后保持同一身份
     let myNickname = localStorage.getItem("anon-nickname") || "";
     if (myNickname.length > 16) myNickname = "";
-    if (myNickname) $("nickname-input").value = myNickname; // 预填到输入框
     const MY_UID = crypto.randomUUID();
 
     // 上次使用的房间号，预填方便快速进入
@@ -360,8 +360,12 @@
       return !!payload && typeof payload.exp === "number" && payload.exp * 1000 > Date.now();
     }
 
-    // 令牌仍有效且已配置时，直接进入令牌绑定的房间
+    // 令牌仍有效且已配置时，直接进入令牌绑定的房间（保持本地身份）
     if (authToken && isTokenValid(authToken) && IS_CONFIGURED) {
+      if (!myNickname) {
+        myNickname = genHandle();
+        localStorage.setItem("anon-nickname", myNickname);
+      }
       currentRoomId = getTokenPayload(authToken).room || "";
       enterRoom();
     } else if (!IS_CONFIGURED) {
@@ -396,13 +400,9 @@
           $("password-input").value = "";
           $("password-input").focus();
         } else {
-          // 应用昵称：填了就用自定义的，留空则随机生成
+          // 应用昵称：填了就用自定义的，留空则随机生成新的
           const nick = $("nickname-input").value.trim().slice(0, 16);
-          if (nick) {
-            myNickname = nick;
-          } else if (!myNickname) {
-            myNickname = genHandle();
-          }
+          myNickname = nick || genHandle();
           localStorage.setItem("anon-nickname", myNickname);
           localStorage.setItem("last-room", roomId);
 
