@@ -244,6 +244,45 @@
     .mic-btn.on { border-color: var(--fg); background: var(--fg); color: var(--btn-hover-text); }
     .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .online-box { font-size: 12px; color: var(--fg-dim); letter-spacing: 1px; }
+
+    /* ---------- 视频通话 ---------- */
+    .video-box {
+      position: absolute;
+      right: 14px;
+      bottom: 78px;
+      z-index: 7;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+    .video-tile {
+      position: relative;
+      width: min(240px, 46vw);
+      background: #000;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+    .video-tile video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: #000;
+    }
+    .video-tile.local video { transform: scaleX(-1); } /* 本地预览镜像 */
+    .video-tile .label {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      padding: 2px 7px;
+      font-size: 11px;
+      letter-spacing: 1px;
+      color: var(--fg);
+      background: rgba(0, 0, 0, 0.6);
+    }
     .online-box b { color: var(--fg); font-size: 13px; }
 
     .msg-list {
@@ -503,6 +542,7 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.17 00:10 <b>视频通话</b>（房间内摄像头开关 + 实时视频画面）<br />
             // 8.16 23:05 <b>新消息提醒</b>（后台标题闪烁 / 提示音 / 系统通知 / 手机 Web Push 推送 / 断线自动补消息）<br />
             // 8.16 22:34 <b>离开房间不再刷新页面</b>（修复沙箱环境 reload 报错）<br />
             // 8.16 22:11 <b>输入框直接显示表情</b>（按钮改为「表情」）<br />
@@ -532,7 +572,9 @@
           <button class="theme-btn" type="button" title="切换明暗主题">[☾ 暗色]</button>
           <div class="online-box">[在线: <b id="online-count">0</b>]</div>
           <div class="online-box">[语音: <b id="voice-count">0</b>]</div>
+          <div class="online-box">[视频: <b id="cam-count">0</b>]</div>
           <button id="mic-btn" class="mic-btn" title="开麦 / 闭麦">[麦克风: OFF]</button>
+          <button id="cam-btn" class="mic-btn" title="开启 / 关闭摄像头">[摄像头: OFF]</button>
           <button id="leave-btn" class="leave-btn">[离开]</button>
         </div>
       </header>
@@ -556,6 +598,7 @@
       </div>
     </div>
     <div id="voice-box" aria-hidden="true"></div>
+    <div id="video-box" class="video-box hidden"></div>
   </div>
 
   <script>
@@ -566,11 +609,11 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.15-ptest";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.16-video";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
-    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }]; // WebRTC 语音 STUN（无 TURN，受限网络可能连不通）
+    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }]; // WebRTC 语音/视频 STUN（无 TURN，受限网络可能连不通）
     // GIF 表情图库：由 gifs/list.js（扫描 gifs 文件夹自动生成）加载，无需改数据库。
     // 消息内容以 [gif:文件名] 形式存储，渲染时只认清单内的文件，杜绝任意链接注入。
     const GIF_LIST = window.GIF_LIST || [];
@@ -636,10 +679,13 @@
     let joinedOnce = false;      // 房间频道是否已首次订阅成功（重连时只补消息不重复提示）
     let pushReady = false;       // 本设备 Web Push 订阅是否就绪（就绪后桌面端不再重复弹网页通知）
 
-    // ---- 语音通话（WebRTC 网状对等）状态 ----
-    const pcMap = new Map(); // 对端 uid -> { pc, makingOffer, ignoreOffer, audioEl }
+    // ---- 语音 / 视频通话（WebRTC 网状对等）状态 ----
+    const pcMap = new Map(); // 对端 uid -> { pc, makingOffer, ignoreOffer, audioEl, videoEl, videoTile, nickname }
     let localStream = null;  // 本地麦克风流
+    let localCamStream = null; // 本地摄像头流
+    let localTile = null;    // 本地视频预览块
     let micOn = false;       // 是否已开麦
+    let camOn = false;       // 是否已开摄像头
 
     // ---- 新消息提醒（后台/其他标签页时）状态 ----
     let baseTitle = ROOM_NAME; // 页面标题基准（进入房间后更新）
@@ -802,7 +848,7 @@
       channel.subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setConn(true);
-          await channel.track({ online_at: new Date().toISOString(), voice: micOn });
+          await updatePresence();
           // 注册 / 更新本设备的 Web Push 订阅（手机系统通知），幂等可重复调用
           registerPush();
           if (!joinedOnce) {
@@ -834,6 +880,7 @@
         // 离开房间：清除会话，回到登录页（可换房间）
         $("leave-btn").addEventListener("click", leaveRoom);
         $("mic-btn").addEventListener("click", toggleMic);
+        $("cam-btn").addEventListener("click", toggleCam);
         // GIF 表情面板：按本地图库清单生成选项，点选即发
         $("gif-btn").addEventListener("click", () => $("gif-panel").classList.toggle("hidden"));
         $("gif-close").addEventListener("click", () => $("gif-panel").classList.add("hidden"));
@@ -863,7 +910,13 @@
       pcMap.clear();
       if (localStream) localStream.getTracks().forEach((t) => t.stop());
       localStream = null;
+      if (localCamStream) localCamStream.getTracks().forEach((t) => t.stop());
+      localCamStream = null;
+      if (localTile) { localTile.remove(); localTile = null; }
+      $("video-box").innerHTML = "";
+      $("video-box").classList.add("hidden");
       micOn = false;
+      camOn = false;
       sendLock = false;
       authToken = "";
       sessionStorage.removeItem("room-token");
@@ -885,6 +938,10 @@
       $("mic-btn").textContent = "[麦克风: OFF]";
       $("mic-btn").classList.remove("on");
       $("mic-btn").disabled = false;
+      $("cam-btn").textContent = "[摄像头: OFF]";
+      $("cam-btn").classList.remove("on");
+      $("cam-btn").disabled = false;
+      $("cam-count").textContent = "0";
       $("send-btn").disabled = false;
       $("online-count").textContent = "0";
       $("voice-count").textContent = "0";
@@ -905,14 +962,24 @@
       const state = channel.presenceState();
       $("online-count").textContent = Object.keys(state).length;
       let voiceCount = 0;
+      let camCount = 0;
       for (const [uid, metas] of Object.entries(state)) {
         if (uid !== MY_UID) {
-          ensurePeer(uid); // 与房间内其他人预留连接；谁持有麦克风谁发起 offer
+          // 与房间内其他人预留连接；谁持有麦克风/摄像头谁发起 offer
+          const entry = ensurePeer(uid);
+          const nick = metas[0] && metas[0].nickname;
+          if (nick) {
+            entry.nickname = String(nick).slice(0, 16);
+            const label = entry.videoTile && entry.videoTile.querySelector(".label");
+            if (label) label.textContent = entry.nickname;
+          }
         }
-        // 语音人数包含自己（与在线人数口径一致）
+        // 语音 / 视频人数包含自己（与在线人数口径一致）
         if (metas.some((m) => m.voice)) voiceCount++;
+        if (metas.some((m) => m.cam)) camCount++;
       }
       $("voice-count").textContent = voiceCount;
+      $("cam-count").textContent = camCount;
     }
 
     /* ---------- 语音通话（WebRTC 网状对等 + Realtime 信令） ---------- */
@@ -933,7 +1000,7 @@
       let entry = pcMap.get(uid);
       if (!entry) {
         const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        entry = { pc, makingOffer: false, ignoreOffer: false, audioEl: null };
+        entry = { pc, makingOffer: false, ignoreOffer: false, audioEl: null, videoEl: null, videoTile: null, nickname: "" };
         pc.onicecandidate = (e) => {
           if (e.candidate) sendSignal(uid, { candidate: e.candidate.toJSON() });
         };
@@ -943,8 +1010,9 @@
         };
         pc.onnegotiationneeded = () => makeOffer(uid, pc);
         pcMap.set(uid, entry);
-        // 已有麦克风流则立即加轨：谁开麦谁负责发起 offer
+        // 已有麦克风 / 摄像头流则立即加轨：谁开麦 / 开摄像头谁负责发起 offer
         if (localStream) pc.addTrack(localStream.getAudioTracks()[0], localStream);
+        if (localCamStream) pc.addTrack(localCamStream.getVideoTracks()[0], localCamStream);
       }
       return entry;
     }
@@ -996,12 +1064,43 @@
     function onRemoteTrack(uid, ev) {
       const entry = pcMap.get(uid);
       if (!entry || !ev.streams[0]) return;
+      const stream = ev.streams[0];
+      if (ev.track.kind === "video") {
+        // 对端视频轨：只接视频轨单独播放（声音仍走 audio 标签，避免重复出声）
+        if (!entry.videoTile) {
+          entry.videoTile = document.createElement("div");
+          entry.videoTile.className = "video-tile";
+          entry.videoEl = document.createElement("video");
+          entry.videoEl.autoplay = true;
+          entry.videoEl.playsInline = true;
+          const label = document.createElement("span");
+          label.className = "label";
+          label.textContent = entry.nickname || ("peer_" + uid.slice(0, 4));
+          entry.videoTile.append(entry.videoEl, label);
+          $("video-box").appendChild(entry.videoTile);
+        }
+        entry.videoEl.srcObject = new MediaStream(stream.getVideoTracks());
+        entry.videoEl.play().catch(() => {});
+        updateVideoBox();
+        // 对端关摄像头时移除其画面（仅当窗口仍显示的是这条已结束的视频轨时才移除，
+        // 防止「快速关开摄像头」时旧轨的 ended 事件误删正在显示新画面的窗口）
+        ev.track.addEventListener("ended", () => {
+          const cur = entry.videoEl && entry.videoEl.srcObject;
+          if (entry.videoTile && cur && cur.getVideoTracks()[0] === ev.track) {
+            entry.videoTile.remove();
+            entry.videoTile = null;
+            entry.videoEl = null;
+            updateVideoBox();
+          }
+        });
+        return;
+      }
       if (!entry.audioEl) {
         entry.audioEl = document.createElement("audio");
         entry.audioEl.autoplay = true;
         $("voice-box").appendChild(entry.audioEl);
       }
-      entry.audioEl.srcObject = ev.streams[0];
+      entry.audioEl.srcObject = new MediaStream(stream.getAudioTracks());
       entry.audioEl.play().catch(() => {});
     }
 
@@ -1010,7 +1109,9 @@
       if (!entry) return;
       try { entry.pc.close(); } catch {}
       if (entry.audioEl) entry.audioEl.remove();
+      if (entry.videoTile) entry.videoTile.remove();
       pcMap.delete(uid);
+      updateVideoBox();
     }
 
     async function toggleMic() {
@@ -1059,10 +1160,111 @@
       }
       btn.textContent = micOn ? "[麦克风: ON]" : "[麦克风: OFF]";
       btn.classList.toggle("on", micOn);
-      // 频道已连接才上报语音状态；未连接时订阅成功后会按当前状态补报
+      // 频道已连接才上报语音 / 视频状态；未连接时订阅成功后会按当前状态补报
+      await updatePresence();
+    }
+
+    /* ---------- 摄像头（视频通话） ---------- */
+    async function updatePresence() {
       if (channel && channel.state === "joined") {
-        try { await channel.track({ online_at: new Date().toISOString(), voice: micOn }); } catch {}
+        try {
+          await channel.track({
+            online_at: new Date().toISOString(),
+            voice: micOn,
+            cam: camOn,
+            nickname: myNickname,
+          });
+        } catch {}
       }
+    }
+
+    function updateVideoBox() {
+      const hasRemote = Array.from(pcMap.values()).some((e) => e.videoTile);
+      $("video-box").classList.toggle("hidden", !localTile && !hasRemote);
+    }
+
+    function showLocalVideo() {
+      if (!localTile && localCamStream) {
+        localTile = document.createElement("div");
+        localTile.className = "video-tile local";
+        const v = document.createElement("video");
+        v.autoplay = true;
+        v.muted = true; // 静音本地预览，防止啸叫
+        v.playsInline = true;
+        v.srcObject = localCamStream;
+        const label = document.createElement("span");
+        label.className = "label";
+        label.textContent = "我";
+        localTile.append(v, label);
+        $("video-box").appendChild(localTile);
+        v.play().catch(() => {});
+      }
+      updateVideoBox();
+    }
+
+    function stopCam() {
+      if (localCamStream) {
+        const tracks = localCamStream.getVideoTracks();
+        for (const [, entry] of pcMap) {
+          for (const track of tracks) {
+            const sender = entry.pc.getSenders().find((s) => s.track === track);
+            if (sender) { try { entry.pc.removeTrack(sender); } catch {} }
+          }
+        }
+        tracks.forEach((t) => t.stop()); // 停止采集，摄像头指示灯熄灭
+        localCamStream = null;
+      }
+      camOn = false;
+      if (localTile) { localTile.remove(); localTile = null; }
+      updateVideoBox();
+    }
+
+    async function toggleCam() {
+      const btn = $("cam-btn");
+      if (!camOn) {
+        btn.disabled = true;
+        try {
+          if (localCamStream) {
+            // 已经获得过摄像头授权：直接恢复
+            localCamStream.getVideoTracks().forEach((t) => (t.enabled = true));
+          } else {
+            try {
+              const status = await navigator.permissions.query({ name: "camera" });
+              if (status.state === "denied") {
+                addSysTip("-- [!] 摄像头权限被拒绝 --");
+                return;
+              }
+            } catch { /* 部分浏览器不支持 permissions.query，直接走 getUserMedia */ }
+            localCamStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+            });
+            const track = localCamStream.getVideoTracks()[0];
+            for (const [, entry] of pcMap) entry.pc.addTrack(track, localCamStream);
+          }
+          camOn = true;
+          showLocalVideo();
+        } catch (err) {
+          console.error(err);
+          if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
+            addSysTip("-- [!] 摄像头权限被拒绝 --");
+          } else if (err && err.name === "NotFoundError") {
+            addSysTip("-- [!] 未检测到摄像头设备，请检查设备连接 --");
+          } else if (err && err.name === "NotReadableError") {
+            addSysTip("-- [!] 摄像头被其他应用占用 --");
+          } else {
+            addSysTip("-- [!] 开启摄像头失败：需要 HTTPS / localhost --");
+          }
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      } else {
+        // 关摄像头：从所有对端移除视频轨并停止采集
+        stopCam();
+      }
+      btn.textContent = camOn ? "[摄像头: ON]" : "[摄像头: OFF]";
+      btn.classList.toggle("on", camOn);
+      await updatePresence();
     }
 
     /* ---------- 历史消息 ---------- */
