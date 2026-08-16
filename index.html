@@ -398,7 +398,26 @@
           body: { roomId, password: pwd },
         });
         if (error || !data || !data.token) {
-          showLoginError("* ACCESS DENIED — 密码错误");
+          // 透出服务端真实错误原因，便于排查
+          let serverMsg = "";
+          try {
+            serverMsg = (error && error.context && error.context.error) || "";
+          } catch { serverMsg = ""; }
+          let msg = "* ACCESS DENIED — 房间密码错误";
+          if (/invalid room id/i.test(serverMsg)) {
+            msg = "* INVALID ROOM ID — 房间号不合法";
+          } else if (/access denied/i.test(serverMsg)) {
+            msg = "* ACCESS DENIED — 房间密码错误";
+          } else if (/service_role/i.test(serverMsg)) {
+            msg = "* SERVER NOT CONFIGURED — 函数缺少 CHAT_SERVICE_ROLE 密钥";
+          } else if (/jwt_secret/i.test(serverMsg)) {
+            msg = "* SERVER NOT CONFIGURED — 函数缺少 CHAT_JWT_SECRET 密钥";
+          } else if (/db error/i.test(serverMsg)) {
+            msg = "* DATABASE ERROR — " + serverMsg;
+          } else if (serverMsg) {
+            msg = "* SERVER: " + serverMsg;
+          }
+          showLoginError(msg);
           $("password-input").value = "";
           $("password-input").focus();
         } else {
@@ -415,8 +434,9 @@
           $("login-error").classList.add("hidden");
           enterRoom();
         }
-      } catch {
-        showLoginError("* NETWORK ERROR — 请稍后重试");
+      } catch (err) {
+        console.error(err);
+        showLoginError("* NETWORK ERROR — 无法连接服务端，请检查网络后重试");
       } finally {
         btn.disabled = false;
       }
