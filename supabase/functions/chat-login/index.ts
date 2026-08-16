@@ -97,10 +97,27 @@ async function signJwt(roomId) {
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
   });
 
+// 跨域（CORS）响应头：允许 Netlify 等部署域名调用本函数
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, apikey, x-client-info",
+  "Access-Control-Max-Age": "86400",
+};
+
 Deno.serve(async (req) => {
+  // 浏览器预检请求：直接放行
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
   try {
     const body = await req.json();
