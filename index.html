@@ -61,6 +61,7 @@
       background: #000;
     }
     .field:focus-within { border-color: var(--fg); }
+    .field + .field { margin-top: 10px; }
     .field .icon { padding: 0 12px; font-size: 13px; color: var(--fg-dim); }
     .field input {
       flex: 1;
@@ -137,6 +138,19 @@
     }
     @keyframes blink { 50% { opacity: 0.15; } }
     .conn-text { font-size: 12px; color: var(--fg-dim); }
+    .room-tag { font-size: 12px; color: var(--fg); letter-spacing: 1px; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .leave-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg-dim);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+    .leave-btn:hover { border-color: var(--danger); color: var(--danger); }
     .online-box { font-size: 12px; color: var(--fg-dim); letter-spacing: 1px; }
     .online-box b { color: var(--fg); font-size: 13px; }
 
@@ -239,6 +253,16 @@
       </div>
 
       <div class="field">
+        <span class="icon">#</span>
+        <input id="room-input" type="text" placeholder="room (不存在将自动创建)" maxlength="24" autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <span class="icon">@</span>
+        <input id="nickname-input" type="text" placeholder="nickname (blank = random)" maxlength="16" autocomplete="off" />
+      </div>
+
+      <div class="field">
         <span class="icon">&gt;</span>
         <input id="password-input" type="password" placeholder="password" maxlength="32" autocomplete="off" />
       </div>
@@ -254,9 +278,13 @@
         <div class="room-info">
           <span id="conn-dot" class="dot"></span>
           <strong id="room-name">zhehaya chat</strong>
+          <span id="room-tag" class="room-tag">#---</span>
           <span id="conn-text" class="conn-text">[LINK: ...]</span>
         </div>
-        <div class="online-box">[ONLINE: <b id="online-count">0</b>]</div>
+        <div class="header-right">
+          <div class="online-box">[ONLINE: <b id="online-count">0</b>]</div>
+          <button id="leave-btn" class="leave-btn">[LEAVE]</button>
+        </div>
       </header>
 
       <main id="msg-list" class="msg-list"></main>
@@ -276,9 +304,11 @@
      * ================================================================== */
     const SUPABASE_URL      = "https://bwcannjfisxpspmondbd.supabase.co"; // TODO: 换成你的 Supabase 项目 URL
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
-    const ROOM_PASSWORD     = "123456";                           // 进入密码（改这里即可）
-    const ROOM_NAME         = "zhehaya chat";                    // 房间显示名称
+    // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
+    const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
+    const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
+    const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
     /* ================================================================== */
 
     const IS_CONFIGURED =
@@ -295,14 +325,16 @@
       return "guest_" + Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
     }
 
-    // 昵称存 localStorage，刷新后仍是同一个人
-    // （旧版本动物昵称不符合格式时，自动重新生成）
-    let myNickname = localStorage.getItem("anon-nickname");
-    if (!myNickname || !/^guest_[0-9a-f]{4}$/.test(myNickname)) {
-      myNickname = genHandle();
-      localStorage.setItem("anon-nickname", myNickname);
-    }
+    // 昵称存 localStorage，刷新后仍是同一人；登录页可自定义
+    let myNickname = localStorage.getItem("anon-nickname") || "";
+    if (myNickname.length > 16) myNickname = "";
+    if (myNickname) $("nickname-input").value = myNickname; // 预填到输入框
     const MY_UID = crypto.randomUUID();
+
+    // 上次使用的房间号，预填方便快速进入
+    let currentRoomId = "";
+    const lastRoom = localStorage.getItem("last-room") || "";
+    if (lastRoom) $("room-input").value = lastRoom;
 
     /* ---------- 登录 ---------- */
     const loginView = $("login-view"), chatView = $("chat-view");
@@ -310,28 +342,91 @@
     const renderedIds = new Set();
     let isNearBottom = true;
     let sendLock = false;
+    let authToken = sessionStorage.getItem("room-token") || "";
+    let roomCreated = false; // 本次是否由自己新建了房间（房主提示）
 
-    // 若已配置且当前会话已通过验证，直接进入
-    if (sessionStorage.getItem("room-authed") === "1" && IS_CONFIGURED) {
+    // 解析 JWT 载荷（获取过期时间与绑定的房间号）
+    function getTokenPayload(token) {
+      try {
+        const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+        return JSON.parse(atob(part));
+      } catch {
+        return null;
+      }
+    }
+
+    function isTokenValid(token) {
+      const payload = getTokenPayload(token);
+      return !!payload && typeof payload.exp === "number" && payload.exp * 1000 > Date.now();
+    }
+
+    // 令牌仍有效且已配置时，直接进入令牌绑定的房间
+    if (authToken && isTokenValid(authToken) && IS_CONFIGURED) {
+      currentRoomId = getTokenPayload(authToken).room || "";
       enterRoom();
     } else if (!IS_CONFIGURED) {
       $("setup-hint").classList.remove("hidden");
     }
 
-    function tryLogin() {
+    function showLoginError(msg) {
+      const el = $("login-error");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+    }
+
+    async function tryLogin() {
       const pwd = $("password-input").value;
-      if (pwd === ROOM_PASSWORD) {
-        sessionStorage.setItem("room-authed", "1");
-        $("login-error").classList.add("hidden");
-        enterRoom();
-      } else {
-        $("login-error").classList.remove("hidden");
-        $("password-input").value = "";
-        $("password-input").focus();
+      const roomId = ($("room-input").value.trim() || DEFAULT_ROOM).toLowerCase();
+      if (!pwd) return;
+      if (!ROOM_ID_RE.test(roomId)) {
+        showLoginError("* INVALID ROOM ID — 2-24 位字母 / 数字 / - / _");
+        $("room-input").focus();
+        return;
+      }
+      const btn = $("login-btn");
+      btn.disabled = true;
+      try {
+        // 调用服务端：房间不存在则创建，存在则校验密码；成功后签发房间令牌
+        const temp = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data, error } = await temp.functions.invoke("chat-login", {
+          body: { roomId, password: pwd },
+        });
+        if (error || !data || !data.token) {
+          showLoginError("* ACCESS DENIED — 密码错误");
+          $("password-input").value = "";
+          $("password-input").focus();
+        } else {
+          // 应用昵称：填了就用自定义的，留空则随机生成
+          const nick = $("nickname-input").value.trim().slice(0, 16);
+          if (nick) {
+            myNickname = nick;
+          } else if (!myNickname) {
+            myNickname = genHandle();
+          }
+          localStorage.setItem("anon-nickname", myNickname);
+          localStorage.setItem("last-room", roomId);
+
+          currentRoomId = data.roomId || roomId;
+          roomCreated = data.created === true;
+          authToken = data.token;
+          sessionStorage.setItem("room-token", authToken);
+          $("login-error").classList.add("hidden");
+          enterRoom();
+        }
+      } catch {
+        showLoginError("* NETWORK ERROR — 请稍后重试");
+      } finally {
+        btn.disabled = false;
       }
     }
 
     $("login-btn").addEventListener("click", tryLogin);
+    $("room-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("nickname-input").focus();
+    });
+    $("nickname-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("password-input").focus();
+    });
     $("password-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") tryLogin();
     });
@@ -341,36 +436,58 @@
       loginView.classList.add("hidden");
       chatView.classList.remove("hidden");
       $("room-name").textContent = ROOM_NAME;
-      document.title = ROOM_NAME;
+      $("room-tag").textContent = "#" + currentRoomId;
+      document.title = ROOM_NAME + " #" + currentRoomId;
       initSupabase();
     }
 
     function initSupabase() {
-      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      // 携带会话令牌创建客户端：REST 请求经 Authorization 头认证
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: "Bearer " + authToken } },
+      });
 
+      // 每个房间一个独立频道：实时消息按 room_id 过滤
       channel = sb
-        .channel("anonymous-chat-room", { config: { presence: { key: MY_UID } } })
+        .channel("room-" + currentRoomId, { config: { presence: { key: MY_UID } } })
         .on("presence", { event: "sync" }, updateOnlineCount)
         .on(
           "postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages" },
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+            filter: "room_id=eq." + currentRoomId,
+          },
           (payload) => {
             if (!renderedIds.has(payload.new.id)) renderMessage(payload.new);
           }
-        )
-        .subscribe(async (status) => {
-          if (status === "SUBSCRIBED") {
-            setConn(true);
-            await channel.track({ online_at: new Date().toISOString() });
-            loadHistory();
-          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-            setConn(false, "[LINK: ERROR]");
+        );
+
+      // Realtime 订阅认证：join 时携带 access_token，服务端据此执行 RLS 检查
+      channel.updateJoinPayload({ access_token: authToken });
+      channel.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          setConn(true);
+          await channel.track({ online_at: new Date().toISOString() });
+          if (roomCreated) {
+            addSysTip(`-- [!] room [#${currentRoomId}] not found → created, you are the owner --`);
           }
-        });
+          addSysTip(`-- joined room [#${currentRoomId}] --`);
+          loadHistory();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setConn(false, "[LINK: ERROR]");
+        }
+      });
 
       $("send-btn").addEventListener("click", sendMessage);
       $("message-input").addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.isComposing) sendMessage();
+      });
+      // 离开房间：清除会话，回到登录页（可换房间）
+      $("leave-btn").addEventListener("click", () => {
+        sessionStorage.removeItem("room-token");
+        location.reload();
       });
       const list = $("msg-list");
       list.addEventListener("scroll", () => {
@@ -378,6 +495,16 @@
         if (isNearBottom) $("jump-btn").classList.add("hidden");
       });
       $("jump-btn").addEventListener("click", scrollToBottom);
+    }
+
+    // 会话过期 / 令牌被拒时，清除会话并回到登录页
+    function handleAuthError(error) {
+      if (error && (error.code === "42501" || /jwt|token/i.test(error.message || ""))) {
+        sessionStorage.removeItem("room-token");
+        location.reload();
+        return true;
+      }
+      return false;
     }
 
     function setConn(ok, text) {
@@ -395,9 +522,11 @@
       const { data, error } = await sb
         .from("messages")
         .select("id, nickname, content, created_at")
+        .eq("room_id", currentRoomId)
         .order("created_at", { ascending: false })
         .limit(HISTORY_LIMIT);
       if (error) {
+        if (handleAuthError(error)) return;
         addSysTip("-- [!] history load failed: " + error.message);
         return;
       }
@@ -472,11 +601,12 @@
 
       const { data, error } = await sb
         .from("messages")
-        .insert({ nickname: myNickname, content })
+        .insert({ room_id: currentRoomId, nickname: myNickname, content })
         .select("id, nickname, content, created_at")
         .single();
 
       if (error) {
+        if (handleAuthError(error)) return;
         addSysTip("-- [!] send failed: " + error.message);
       } else if (data) {
         input.value = "";
