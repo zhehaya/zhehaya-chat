@@ -542,6 +542,7 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.17 01:10 <b>修复人数/语音数显示错误</b>（离开者残留、重进后听不到/看不到对方的问题）<br />
             // 8.17 00:40 <b>开麦 / 开摄像头稳定性</b>（修复偶发权限获取失败：约束降级 + 自动重试 + 防连点）<br />
             // 8.17 00:25 <b>视频窗收起/展开</b>（一键收起或展开所有人的视频画面）<br />
             // 8.17 00:10 <b>视频通话</b>（房间内摄像头开关 + 实时视频画面）<br />
@@ -612,11 +613,13 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.18-micfix";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.19-presence";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
-    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }]; // WebRTC 语音/视频 STUN（无 TURN，受限网络可能连不通）
+    // WebRTC 语音/视频 STUN；跨网络（手机流量等）连不通时需自建/租用 TURN 服务器，
+    // 在下方数组中追加：{ urls: "turn:你的地址:3478", username: "...", credential: "..." }
+    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }];
     // GIF 表情图库：由 gifs/list.js（扫描 gifs 文件夹自动生成）加载，无需改数据库。
     // 消息内容以 [gif:文件名] 形式存储，渲染时只认清单内的文件，杜绝任意链接注入。
     const GIF_LIST = window.GIF_LIST || [];
@@ -898,6 +901,11 @@
           if (isNearBottom) $("jump-btn").classList.add("hidden");
         });
         $("jump-btn").addEventListener("click", scrollToBottom);
+        // 关闭 / 刷新页面前主动移除在线状态：否则服务端残留幽灵在线，
+        // 人数与开麦数会虚高最长 60 秒（Realtime 心跳超时）
+        window.addEventListener("pagehide", () => {
+          try { if (channel) channel.untrack(); } catch {}
+        });
       }
     }
 
@@ -973,6 +981,12 @@
     function handlePresenceSync() {
       if (!channel) return;
       const state = channel.presenceState();
+      // 关闭已离开的对端连接：Realtime v2 的 leave 事件只带 presence_ref（随机 ID），
+      // 无法用它对回 pcMap 的键（presence key），所以这里直接按最新状态修剪——
+      // presence 里没有的 uid 一律关闭，同时清除断线后服务端残留的幽灵条目对应连接。
+      for (const uid of Array.from(pcMap.keys())) {
+        if (!(uid in state)) closePeer(uid);
+      }
       $("online-count").textContent = Object.keys(state).length;
       let voiceCount = 0;
       let camCount = 0;
