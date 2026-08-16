@@ -162,6 +162,19 @@
       cursor: pointer;
     }
     .leave-btn:hover { border-color: var(--danger); color: var(--danger); }
+    .mic-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg-dim);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+    .mic-btn:hover { border-color: var(--fg); color: var(--fg); }
+    .mic-btn.on { border-color: var(--fg); background: var(--fg); color: #000; }
+    .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .online-box { font-size: 12px; color: var(--fg-dim); letter-spacing: 1px; }
     .online-box b { color: var(--fg); font-size: 13px; }
 
@@ -301,6 +314,8 @@
         </div>
         <div class="header-right">
           <div class="online-box">[ONLINE: <b id="online-count">0</b>]</div>
+          <div class="online-box">[VOICE: <b id="voice-count">0</b>]</div>
+          <button id="mic-btn" class="mic-btn" title="开麦 / 闭麦">[MIC: OFF]</button>
           <button id="leave-btn" class="leave-btn">[LEAVE]</button>
         </div>
       </header>
@@ -314,6 +329,7 @@
         <button id="send-btn" class="send-btn">[SEND]</button>
       </footer>
     </div>
+    <div id="voice-box" aria-hidden="true"></div>
   </div>
 
   <script>
@@ -324,10 +340,11 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v3.0-multiroom";                   // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.0-voice";                      // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
+    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }]; // WebRTC 语音 STUN（无 TURN，受限网络可能连不通）
     /* ================================================================== */
 
     const IS_CONFIGURED =
@@ -364,6 +381,11 @@
     let sendLock = false;
     let authToken = sessionStorage.getItem("room-token") || "";
     let roomCreated = false; // 本次是否由自己新建了房间（房主提示）
+
+    // ---- 语音通话（WebRTC 网状对等）状态 ----
+    const pcMap = new Map(); // 对端 uid -> { pc, makingOffer, ignoreOffer, audioEl }
+    let localStream = null;  // 本地麦克风流
+    let micOn = false;       // 是否已开麦
 
     // 解析 JWT 载荷（获取过期时间与绑定的房间号）
     function getTokenPayload(token) {
@@ -490,7 +512,11 @@
       // 每个房间一个独立频道：实时消息按 room_id 过滤
       channel = sb
         .channel("room-" + currentRoomId, { config: { presence: { key: MY_UID } } })
-        .on("presence", { event: "sync" }, updateOnlineCount)
+        .on("presence", { event: "sync" }, handlePresenceSync)
+        .on("presence", { event: "leave" }, ({ leftPresences }) => {
+          (leftPresences || []).forEach((p) => closePeer(p.user_id || p.presence_ref));
+        })
+        .on("broadcast", { event: "rtc" }, ({ payload }) => handleSignal(payload))
         .on(
           "postgres_changes",
           {
@@ -509,7 +535,7 @@
       channel.subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setConn(true);
-          await channel.track({ online_at: new Date().toISOString() });
+          await channel.track({ online_at: new Date().toISOString(), voice: false });
           if (roomCreated) {
             addSysTip(`-- [!] room [#${currentRoomId}] not found → created, you are the owner --`);
           }
@@ -529,6 +555,7 @@
         sessionStorage.removeItem("room-token");
         location.reload();
       });
+      $("mic-btn").addEventListener("click", toggleMic);
       const list = $("msg-list");
       list.addEventListener("scroll", () => {
         isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -552,9 +579,149 @@
       $("conn-text").textContent = text || (ok ? "[LINK: OK]" : "[LINK: DOWN]");
     }
 
-    function updateOnlineCount() {
+    function handlePresenceSync() {
       if (!channel) return;
-      $("online-count").textContent = Object.keys(channel.presenceState()).length;
+      const state = channel.presenceState();
+      $("online-count").textContent = Object.keys(state).length;
+      let voiceCount = 0;
+      for (const [uid, metas] of Object.entries(state)) {
+        if (uid === MY_UID) continue;
+        ensurePeer(uid); // 与房间内每个人都预留连接；谁持有麦克风谁发起 offer
+        if (metas.some((m) => m.voice)) voiceCount++;
+      }
+      $("voice-count").textContent = voiceCount;
+    }
+
+    /* ---------- 语音通话（WebRTC 网状对等 + Realtime 信令） ---------- */
+    function sendSignal(to, extra) {
+      channel.send({
+        type: "broadcast",
+        event: "rtc",
+        payload: { from: MY_UID, to, ...extra },
+      });
+    }
+
+    function descOf(d) {
+      return { type: d.type, sdp: d.sdp };
+    }
+
+    function ensurePeer(uid) {
+      if (uid === MY_UID) return null;
+      let entry = pcMap.get(uid);
+      if (!entry) {
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        entry = { pc, makingOffer: false, ignoreOffer: false, audioEl: null };
+        pc.onicecandidate = (e) => {
+          if (e.candidate) sendSignal(uid, { candidate: e.candidate.toJSON() });
+        };
+        pc.ontrack = (e) => onRemoteTrack(uid, e);
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "failed") closePeer(uid); // 断连后由 presence 同步重建
+        };
+        pc.onnegotiationneeded = () => makeOffer(uid, pc);
+        pcMap.set(uid, entry);
+        // 已有麦克风流则立即加轨：谁开麦谁负责发起 offer
+        if (localStream) pc.addTrack(localStream.getAudioTracks()[0], localStream);
+      }
+      return entry;
+    }
+
+    async function makeOffer(uid, pc) {
+      if (pc.makingOffer) return;
+      pc.makingOffer = true;
+      try {
+        await pc.setLocalDescription(await pc.createOffer());
+        sendSignal(uid, { description: descOf(pc.localDescription) });
+      } catch (err) {
+        console.warn("voice: offer failed", err);
+      } finally {
+        pc.makingOffer = false;
+      }
+    }
+
+    // 完美协商（perfect negotiation）：offer 冲突时 uid 小的一方是礼貌方，
+    // 冲突时由非礼貌方忽略对方的 offer，礼貌方隐式回滚后应答，保证两端只走一条协商
+    async function handleSignal(msg) {
+      if (!msg || !msg.from || msg.to !== MY_UID) return;
+      const entry = ensurePeer(msg.from);
+      if (!entry) return;
+      const pc = entry.pc;
+      try {
+        if (msg.description) {
+          const offerCollision =
+            msg.description.type === "offer" &&
+            (pc.makingOffer || pc.signalingState !== "stable");
+          entry.ignoreOffer = MY_UID >= msg.from && offerCollision;
+          if (entry.ignoreOffer) return;
+          await pc.setRemoteDescription(msg.description);
+          if (msg.description.type === "offer") {
+            await pc.setLocalDescription(await pc.createAnswer());
+            sendSignal(msg.from, { description: descOf(pc.localDescription) });
+          }
+        } else if (msg.candidate) {
+          try {
+            await pc.addIceCandidate(msg.candidate);
+          } catch (err) {
+            if (!entry.ignoreOffer) console.warn("voice: ice failed", err);
+          }
+        }
+      } catch (err) {
+        console.warn("voice: signal error", err);
+      }
+    }
+
+    function onRemoteTrack(uid, ev) {
+      const entry = pcMap.get(uid);
+      if (!entry || !ev.streams[0]) return;
+      if (!entry.audioEl) {
+        entry.audioEl = document.createElement("audio");
+        entry.audioEl.autoplay = true;
+        $("voice-box").appendChild(entry.audioEl);
+      }
+      entry.audioEl.srcObject = ev.streams[0];
+      entry.audioEl.play().catch(() => {});
+    }
+
+    function closePeer(uid) {
+      const entry = pcMap.get(uid);
+      if (!entry) return;
+      try { entry.pc.close(); } catch {}
+      if (entry.audioEl) entry.audioEl.remove();
+      pcMap.delete(uid);
+    }
+
+    async function toggleMic() {
+      if (!channel || channel.state !== "joined") {
+        addSysTip("-- [!] voice link not ready --");
+        return;
+      }
+      const btn = $("mic-btn");
+      if (!micOn) {
+        btn.disabled = true;
+        try {
+          if (!localStream) {
+            // 首次开麦：请求麦克风，并把轨道加进所有既有连接
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const track = localStream.getAudioTracks()[0];
+            for (const [, entry] of pcMap) entry.pc.addTrack(track, localStream);
+          } else {
+            localStream.getAudioTracks().forEach((t) => (t.enabled = true));
+          }
+          micOn = true;
+        } catch (err) {
+          console.error(err);
+          addSysTip("-- [!] mic failed: 需要麦克风权限（HTTPS / localhost 才能开麦）--");
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      } else {
+        localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+        micOn = false;
+      }
+      btn.textContent = micOn ? "[MIC: ON]" : "[MIC: OFF]";
+      btn.classList.toggle("on", micOn);
+      channel.track({ online_at: new Date().toISOString(), voice: micOn });
     }
 
     /* ---------- 历史消息 ---------- */
@@ -665,6 +832,8 @@
     /* ---------- 关闭页面时上报离开 ---------- */
     window.addEventListener("beforeunload", () => {
       if (channel) sb.removeChannel(channel);
+      for (const [, entry] of pcMap) { try { entry.pc.close(); } catch {} }
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
     });
   </script>
 </body>

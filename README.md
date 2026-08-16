@@ -11,6 +11,7 @@
 - 🎭 匿名昵称**进入时自定义**（最长 16 字符，留空则随机生成 `guest_xxxx`，浏览器本地保存）
 - ⚡ 消息按房间隔离、实时收发（Supabase Realtime）
 - 👥 每房间独立在线人数统计（Presence）
+- 🎙 **实时开麦**：房间内语音通话（WebRTC 点对点，信令经 Supabase Realtime Broadcast）
 - 📱 响应式界面，手机 / 电脑均可使用
 - 🛡️ 数据库级防护：匿名请求一律拒绝，只有持有效令牌者才能读写
 - 🛡️ 消息内容以纯文本渲染，防 XSS 注入
@@ -63,6 +64,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_...";       // 你的 anon public key
 - 登录页依次填写：**房间号**（2-24 位字母/数字/`-`/`_`，留空进默认房间 `zhehaya-chat`）、**昵称**（可留空随机）、**密码**
 - 房间不存在 → 自动用你输入的密码**创建房间**，进入后提示你是房主
 - 房间已存在 → 输入创建者设置的密码即可进入
+- 聊天页 **[MIC: OFF]** 按钮切换开麦 / 闭麦：开麦后房间内所有人可实时语音通话（首次点击会请求麦克风权限）
 - 聊天页右上角 **[LEAVE]** 可退出当前房间，回到登录页换房间
 - 历史数据：旧版聊天记录都在 `zhehaya-chat` 房间，首次进入用当时的密码即可创建并接管该房间
 
@@ -85,7 +87,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_...";       // 你的 anon public key
 
 | 文件 | 说明 |
 | --- | --- |
-| `index.html` | 主页：登录 + 聊天界面 + 全部前端逻辑（单文件应用） |
+| `index.html` | 主页：登录 + 文字聊天 + 语音通话 + 全部前端逻辑（单文件应用） |
 | `supabase/functions/chat-login/index.ts` | 服务端登录函数：验证密码、签发会话令牌 |
 | `supabase-setup.sql` | 数据库初始化脚本（建表、RLS 令牌校验、开启 Realtime） |
 | `README.md` | 本文档 |
@@ -119,3 +121,13 @@ A：说明请求未携带有效令牌。刷新页面重新登录（令牌 1 小�
 
 **Q：只想保留更少历史消息？**
 A：修改 `index.html` 配置区的 `HISTORY_LIMIT` 常量。
+
+**Q：开麦失败或听不到声音？**
+A：按顺序检查：
+1. 页面必须运行在 **HTTPS**（或 localhost）环境，直接双击 `index.html`（`file://`）可能被浏览器禁止使用麦克风，建议用 Live Server；
+2. 浏览器是否已授权麦克风权限；
+3. 语音为 P2P 直连，仅使用公共 STUN，对称 NAT / 严格公司防火墙下可能连不通——需要高可用请自建 TURN（coturn）或改用 SFU（如 LiveKit）；
+4. 聊天人数较多（约 6 人以上）时网状连接会吃力，属预期限制。
+
+**Q：想限制语音信令只在本房间收发？**
+A：重新执行 `supabase-setup.sql`（第 8 节为 Realtime Broadcast 增加房间级 RLS 策略）。

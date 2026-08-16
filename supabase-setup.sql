@@ -68,3 +68,24 @@ end $$;
 --   Database → Replication → supabase_realtime 发布
 --   → 在 "Tables" 中找到 messages 并开启。
 --   （新版控制台路径：左侧 Database → Replication → 0 tables → Add messages）
+
+-- ============================================================
+--  8.（可选）语音信令房间隔离
+--  语音通话的 offer / answer / ICE 信令通过 Realtime Broadcast
+--  传输，默认任何持令牌者都能向任意频道发信令。执行下面的
+--  策略后，Broadcast / Presence 只能在「令牌绑定的房间」频道
+--  内收发（可安全重复执行）。
+--  注意：如果执行后语音异常，删除这两个策略即可回退。
+-- ============================================================
+alter table realtime.messages enable row level security;
+
+drop policy if exists "room_rtc_read" on realtime.messages;
+drop policy if exists "room_rtc_write" on realtime.messages;
+
+create policy "room_rtc_read"
+  on realtime.messages for select
+  using (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
+
+create policy "room_rtc_write"
+  on realtime.messages for insert
+  with check (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
