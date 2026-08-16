@@ -500,7 +500,7 @@
             filter: "room_id=eq." + currentRoomId,
           },
           (payload) => {
-            if (!renderedIds.has(payload.new.id)) renderMessage(payload.new);
+            renderMessage(payload.new); // 内部按 id 去重
           }
         );
 
@@ -581,12 +581,16 @@
 
     /* ---------- 渲染消息 ---------- */
     function renderMessage(msg) {
-      renderedIds.add(msg.id);
+      // id 在 REST 返回中是字符串、Realtime 推送中是数字，统一转字符串再去重，
+      // 否则同一消息会在本地渲染 + 实时推送时各渲染一次，出现两条相同内容
+      const key = String(msg.id);
+      if (renderedIds.has(key)) return;
+      renderedIds.add(key);
       const list = $("msg-list");
 
       const row = document.createElement("div");
       row.className = "msg" + (msg.nickname === myNickname ? " me" : "");
-      row.dataset.id = msg.id;
+      row.dataset.id = key;
 
       const t = document.createElement("span");
       t.className = "t";
