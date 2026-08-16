@@ -18,34 +18,90 @@ create table if not exists public.messages (
   content     text not null,                        -- 消息内容
   created_at  timestamptz not null default now()
 );
-alter table public.messages
-  add column if not exists room_id text not null default 'zhehaya-chat';
+
+-- 表已存在但当前角色不是所有者时，自动跳过需要所有权的变更
+-- （常见原因：SQL Editor 角色选择器被切到非 postgres 角色，请切回 postgres）
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'messages'
+      and t.tableowner = current_user
+  ) then
+    alter table public.messages
+      add column if not exists room_id text not null default 'zhehaya-chat';
+  else
+    raise notice '跳过：当前角色不是 messages 表所有者';
+  end if;
+end $$;
 
 -- 3. 索引（按房间拉取历史消息）
-create index if not exists messages_room_created_idx
-  on public.messages (room_id, created_at desc);
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'messages'
+      and t.tableowner = current_user
+  ) then
+    create index if not exists messages_room_created_idx
+      on public.messages (room_id, created_at desc);
+  end if;
+end $$;
 
 -- 4. 开启行级安全（RLS）
-alter table public.rooms enable row level security;
-alter table public.messages enable row level security;
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'rooms'
+      and t.tableowner = current_user
+  ) then
+    alter table public.rooms enable row level security;
+  end if;
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'messages'
+      and t.tableowner = current_user
+  ) then
+    alter table public.messages enable row level security;
+  end if;
+end $$;
 
 -- 5. 房间表完全不向客户端开放（判断存在 / 验证密码全部由 Edge Function 完成）
-revoke all on public.rooms from anon, authenticated;
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'rooms'
+      and t.tableowner = current_user
+  ) then
+    revoke all on public.rooms from anon, authenticated;
+  end if;
+end $$;
 
 -- 6. 消息策略：只能读写「JWT 中 room 声明」对应的房间
 --    令牌由 Edge Function「chat-login」验证密码后按房间签发。
-drop policy if exists "allow_select_messages" on public.messages;
-drop policy if exists "allow_insert_messages" on public.messages;
-drop policy if exists "room_select_messages" on public.messages;
-drop policy if exists "room_insert_messages" on public.messages;
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'public' and t.tablename = 'messages'
+      and t.tableowner = current_user
+  ) then
+    drop policy if exists "allow_select_messages" on public.messages;
+    drop policy if exists "allow_insert_messages" on public.messages;
+    drop policy if exists "room_select_messages" on public.messages;
+    drop policy if exists "room_insert_messages" on public.messages;
 
-create policy "room_select_messages"
-  on public.messages for select
-  using (room_id = (auth.jwt() ->> 'room'));
+    create policy "room_select_messages"
+      on public.messages for select
+      using (room_id = (auth.jwt() ->> 'room'));
 
-create policy "room_insert_messages"
-  on public.messages for insert
-  with check (room_id = (auth.jwt() ->> 'room'));
+    create policy "room_insert_messages"
+      on public.messages for insert
+      with check (room_id = (auth.jwt() ->> 'room'));
+  end if;
+end $$;
 
 -- ============================================================
 --  7. 开启 Realtime（二选一）
@@ -60,7 +116,11 @@ begin
       and schemaname = 'public'
       and tablename = 'messages'
   ) then
-    alter publication supabase_realtime add table public.messages;
+    begin
+      alter publication supabase_realtime add table public.messages;
+    exception when insufficient_privilege then
+      raise notice '跳过：无权修改 publication supabase_realtime';
+    end;
   end if;
 end $$;
 
@@ -77,18 +137,29 @@ end $$;
 --  内收发（可安全重复执行）。
 --  注意：如果执行后语音异常，删除这两个策略即可回退。
 -- ============================================================
-alter table realtime.messages enable row level security;
+do $$
+begin
+  if exists (
+    select 1 from pg_tables t
+    where t.schemaname = 'realtime' and t.tablename = 'messages'
+      and t.tableowner = current_user
+  ) then
+    alter table realtime.messages enable row level security;
 
-drop policy if exists "room_rtc_read" on realtime.messages;
-drop policy if exists "room_rtc_write" on realtime.messages;
+    drop policy if exists "room_rtc_read" on realtime.messages;
+    drop policy if exists "room_rtc_write" on realtime.messages;
 
-create policy "room_rtc_read"
-  on realtime.messages for select
-  using (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
+    create policy "room_rtc_read"
+      on realtime.messages for select
+      using (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
 
-create policy "room_rtc_write"
-  on realtime.messages for insert
-  with check (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
+    create policy "room_rtc_write"
+      on realtime.messages for insert
+      with check (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
+  else
+    raise notice '跳过：当前角色不是 realtime.messages 表所有者';
+  end if;
+end $$;
 
 -- ============================================================
 --  9.（Web Push 手机通知）订阅表：记录每台设备的推送订阅。

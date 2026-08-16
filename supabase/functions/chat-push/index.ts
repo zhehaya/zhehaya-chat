@@ -57,6 +57,9 @@ Deno.serve(async (req) => {
       typeof body?.roomId === "string" ? body.roomId.trim().toLowerCase() : "";
     const excludeUid =
       typeof body?.excludeUid === "string" ? body.excludeUid : "";
+    const onlyUid =
+      typeof body?.onlyUid === "string" ? body.onlyUid : "";
+    const url = typeof body?.url === "string" ? body.url : "./";
     const nickname =
       typeof body?.nickname === "string" ? body.nickname.slice(0, 16) : "?";
     const content =
@@ -80,7 +83,8 @@ Deno.serve(async (req) => {
       .from("push_subs")
       .select("uid, endpoint, p256dh, auth")
       .eq("room_id", roomId);
-    if (excludeUid) q = q.neq("uid", excludeUid);
+    if (onlyUid) q = q.eq("uid", onlyUid);
+    else if (excludeUid) q = q.neq("uid", excludeUid);
     const { data: subs, error } = await q;
     if (error) return json({ error: "db error: " + error.message }, 500);
 
@@ -88,10 +92,11 @@ Deno.serve(async (req) => {
     const payload = JSON.stringify({
       title,
       body: nickname + ": " + content,
-      url: "/",
+      url,
     });
 
     let sent = 0;
+    const failed = [];
     for (const s of subs || []) {
       try {
         await webpush.sendNotification(
@@ -99,11 +104,12 @@ Deno.serve(async (req) => {
           payload
         );
         sent++;
-      } catch {
-        // 订阅可能已失效（浏览器重置等），静默跳过
+      } catch (e) {
+        // 收集失败原因返回给前端展示，而不是静默吞掉
+        failed.push(String((e && e.message) || e));
       }
     }
-    return json({ sent });
+    return json({ sent, total: (subs || []).length, errors: failed.slice(0, 3) });
   } catch (err) {
     return json({ error: String(err) }, 500);
   }
