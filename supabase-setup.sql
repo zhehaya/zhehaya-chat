@@ -89,3 +89,34 @@ create policy "room_rtc_read"
 create policy "room_rtc_write"
   on realtime.messages for insert
   with check (realtime.topic() = 'realtime:room-' || (auth.jwt() ->> 'room'));
+
+-- ============================================================
+--  9.（Web Push 手机通知）订阅表：记录每台设备的推送订阅。
+--  客户端进入房间后写入自己的订阅；Edge Function「chat-push」
+--  按房间读取并发送推送。可安全重复执行。
+-- ============================================================
+create table if not exists public.push_subs (
+  id         bigint generated always as identity primary key,
+  uid        text not null,          -- 客户端随机身份（仅用于排除自己）
+  room_id    text not null,          -- 所属房间
+  endpoint   text not null,          -- 推送端点 URL
+  p256dh     text not null,          -- 客户端公钥
+  auth       text not null,          -- 客户端认证密钥
+  created_at timestamptz not null default now()
+);
+
+create index if not exists push_subs_room_idx on public.push_subs (room_id);
+
+alter table public.push_subs enable row level security;
+
+drop policy if exists "push_subs_insert" on public.push_subs;
+drop policy if exists "push_subs_delete" on public.push_subs;
+
+-- 只允许在本房间写入 / 删除订阅（服务端用 service_role 读取）
+create policy "push_subs_insert"
+  on public.push_subs for insert
+  with check (room_id = (auth.jwt() ->> 'room'));
+
+create policy "push_subs_delete"
+  on public.push_subs for delete
+  using (room_id = (auth.jwt() ->> 'room'));

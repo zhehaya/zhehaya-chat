@@ -499,6 +499,12 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.16 22:48 <b>手机系统通知</b>（Web Push：电脑网页通知 / 手机推送）<br />
+            // 8.16 22:42 <b>持续消息监控</b>（断线重连 / 回前台自动补消息）<br />
+            // 8.16 22:38 <b>进房即申请通知权限</b>（允许才提醒，移除测试按钮）<br />
+            // 8.16 22:34 <b>离开房间不再刷新页面</b>（修复沙箱环境 reload 报错）<br />
+            // 8.16 22:30 <b>提醒增强</b>（失焦检测 / 点击通知回窗 / 测试按钮）<br />
+            // 8.16 22:25 <b>后台新消息提醒</b>（标题闪烁 / 提示音 / 系统通知）<br />
             // 8.16 22:11 <b>输入框直接显示表情</b>（按钮改为「表情」）<br />
             // 8.16 21:50 <b>表情支持与文字混排</b><br />
             // 8.16 21:20 <b>表情功能</b>（本地 gifs 图库点选发送）<br />
@@ -560,7 +566,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.7-input";                      // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.13-push";                     // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -572,6 +578,7 @@
     GIF_LIST.forEach((name, idx) => {
       GIFS[name] = { url: "gifs/" + name, label: "表情" + (idx + 1) };
     });
+    const VAPID_PUBLIC_KEY  = "BCtkfWCNVtWYb85-K7fLACpnEnszDWeqh3OFSxE72aMuIJLwnlTJ4OEWjn56x8Rm5LgDFRmh1ayTFctLDQsbd7I"; // Web Push 公钥（与 chat-push 函数一致）
     /* ================================================================== */
 
     const IS_CONFIGURED =
@@ -625,11 +632,20 @@
     let sendLock = false;
     let authToken = sessionStorage.getItem("room-token") || "";
     let roomCreated = false; // 本次是否由自己新建了房间（房主提示）
+    let listenersReady = false; // 界面事件监听只注册一次（软重置后不重复绑定）
+    let joinedOnce = false;      // 房间频道是否已首次订阅成功（重连时只补消息不重复提示）
+    let pushReady = false;       // 本设备 Web Push 订阅是否就绪（就绪后桌面端不再重复弹网页通知）
 
     // ---- 语音通话（WebRTC 网状对等）状态 ----
     const pcMap = new Map(); // 对端 uid -> { pc, makingOffer, ignoreOffer, audioEl }
     let localStream = null;  // 本地麦克风流
     let micOn = false;       // 是否已开麦
+
+    // ---- 新消息提醒（后台/其他标签页时）状态 ----
+    let baseTitle = ROOM_NAME; // 页面标题基准（进入房间后更新）
+    let newMsgCount = 0;       // 后台期间未读消息数
+    let titleTimer = null;     // 标题闪烁计时器
+    let audioCtx = null;       // 提示音 AudioContext
 
     // 解析 JWT 载荷（获取过期时间与绑定的房间号）
     function getTokenPayload(token) {
@@ -743,7 +759,10 @@
       chatView.classList.remove("hidden");
       $("room-name").textContent = ROOM_NAME;
       $("room-tag").textContent = "#" + currentRoomId;
-      document.title = ROOM_NAME + " #" + currentRoomId;
+      baseTitle = ROOM_NAME + " #" + currentRoomId;
+      document.title = baseTitle;
+      // 进入聊天室即申请通知权限：允许才有后台提醒，拒绝/忽略则不提醒
+      requestNotifyPermission();
       initSupabase();
     }
 
@@ -771,6 +790,10 @@
           },
           (payload) => {
             renderMessage(payload.new); // 内部按 id 去重
+            // 页面不在前台（其他标签页 / 窗口被遮挡或最小化 / 手机后台）时提示新消息
+            if (!isPageActive() && payload.new.nickname !== myNickname) {
+              notifyMessage(payload.new);
+            }
           }
         );
 
@@ -780,49 +803,95 @@
         if (status === "SUBSCRIBED") {
           setConn(true);
           await channel.track({ online_at: new Date().toISOString(), voice: micOn });
-          if (roomCreated) {
-            addSysTip(`-- [!] 房间 [#${currentRoomId}] 不存在 → 已自动创建，你是房主 --`);
+          // 注册 / 更新本设备的 Web Push 订阅（手机系统通知），幂等可重复调用
+          registerPush();
+          if (!joinedOnce) {
+            joinedOnce = true;
+            if (roomCreated) {
+              addSysTip(`-- [!] 房间 [#${currentRoomId}] 不存在 → 已自动创建，你是房主 --`);
+            }
+            addSysTip(`-- 已加入房间 [#${currentRoomId}] --`);
+            loadHistory();
+          } else {
+            // 断线重连：补齐错过的消息（按 id 去重，不会重复显示）
+            refreshHistory();
           }
-          addSysTip(`-- 已加入房间 [#${currentRoomId}] --`);
-          loadHistory();
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           setConn(false, "[连接: 异常]");
         }
       });
 
-      $("send-btn").addEventListener("click", sendMessage);
-      $("message-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.isComposing) {
-          e.preventDefault(); // 阻止可编辑容器换行，回车即发送
-          sendMessage();
-        }
-      });
-      // 离开房间：清除会话，回到登录页（可换房间）
-      $("leave-btn").addEventListener("click", () => {
-        sessionStorage.removeItem("room-token");
-        location.reload();
-      });
-      $("mic-btn").addEventListener("click", toggleMic);
-      // GIF 表情面板：按本地图库清单生成选项，点选即发
-      $("gif-btn").addEventListener("click", () => $("gif-panel").classList.toggle("hidden"));
-      $("gif-close").addEventListener("click", () => $("gif-panel").classList.add("hidden"));
-      buildGifPanel();
-      const list = $("msg-list");
-      list.addEventListener("scroll", () => {
-        isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-        if (isNearBottom) $("jump-btn").classList.add("hidden");
-      });
-      $("jump-btn").addEventListener("click", scrollToBottom);
+      // 界面事件只注册一次（离开房间改为软重置，避免重复绑定）
+      if (!listenersReady) {
+        listenersReady = true;
+        $("send-btn").addEventListener("click", sendMessage);
+        $("message-input").addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.isComposing) {
+            e.preventDefault(); // 阻止可编辑容器换行，回车即发送
+            sendMessage();
+          }
+        });
+        // 离开房间：清除会话，回到登录页（可换房间）
+        $("leave-btn").addEventListener("click", leaveRoom);
+        $("mic-btn").addEventListener("click", toggleMic);
+        // GIF 表情面板：按本地图库清单生成选项，点选即发
+        $("gif-btn").addEventListener("click", () => $("gif-panel").classList.toggle("hidden"));
+        $("gif-close").addEventListener("click", () => $("gif-panel").classList.add("hidden"));
+        buildGifPanel();
+        const list = $("msg-list");
+        list.addEventListener("scroll", () => {
+          isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+          if (isNearBottom) $("jump-btn").classList.add("hidden");
+        });
+        $("jump-btn").addEventListener("click", scrollToBottom);
+      }
     }
 
     // 会话过期 / 令牌被拒时，清除会话并回到登录页
     function handleAuthError(error) {
       if (error && (error.code === "42501" || /jwt|token/i.test(error.message || ""))) {
-        sessionStorage.removeItem("room-token");
-        location.reload();
+        leaveRoom();
         return true;
       }
       return false;
+    }
+
+    // 离开房间：不刷新页面，直接清理连接与界面（兼容拦截 reload 的沙箱环境）
+    function leaveRoom() {
+      try { if (channel) sb.removeChannel(channel); } catch {}
+      for (const [, entry] of pcMap) { try { entry.pc.close(); } catch {} }
+      pcMap.clear();
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      localStream = null;
+      micOn = false;
+      sendLock = false;
+      authToken = "";
+      sessionStorage.removeItem("room-token");
+      joinedOnce = false;
+      // 移除本设备的推送订阅（离开房间后不再接收该房间推送）
+      try { if (sb) sb.from("push_subs").delete().eq("uid", MY_UID); } catch {}
+      pushReady = false;
+      // 重置新消息提醒状态
+      newMsgCount = 0;
+      if (titleTimer) { clearInterval(titleTimer); titleTimer = null; }
+      document.title = ROOM_NAME;
+      // 重置聊天界面
+      renderedIds.clear();
+      $("msg-list").innerHTML = "";
+      $("message-input").textContent = "";
+      $("gif-panel").classList.add("hidden");
+      $("jump-btn").classList.add("hidden");
+      $("mic-btn").textContent = "[麦克风: OFF]";
+      $("mic-btn").classList.remove("on");
+      $("mic-btn").disabled = false;
+      $("send-btn").disabled = false;
+      $("online-count").textContent = "0";
+      $("voice-count").textContent = "0";
+      chatView.classList.add("hidden");
+      loginView.classList.remove("hidden");
+      $("room-input").value = localStorage.getItem("last-room") || "";
+      $("password-input").value = "";
+      $("password-input").focus();
     }
 
     function setConn(ok, text) {
@@ -836,8 +905,10 @@
       $("online-count").textContent = Object.keys(state).length;
       let voiceCount = 0;
       for (const [uid, metas] of Object.entries(state)) {
-        if (uid === MY_UID) continue;
-        ensurePeer(uid); // 与房间内每个人都预留连接；谁持有麦克风谁发起 offer
+        if (uid !== MY_UID) {
+          ensurePeer(uid); // 与房间内其他人预留连接；谁持有麦克风谁发起 offer
+        }
+        // 语音人数包含自己（与在线人数口径一致）
         if (metas.some((m) => m.voice)) voiceCount++;
       }
       $("voice-count").textContent = voiceCount;
@@ -1015,6 +1086,20 @@
       scrollToBottom();
     }
 
+    // 补齐断线 / 后台期间错过的新消息（按 id 去重，不会重复显示）
+    async function refreshHistory() {
+      if (!sb) return;
+      try {
+        const { data, error } = await sb
+          .from("messages")
+          .select("id, nickname, content, created_at")
+          .eq("room_id", currentRoomId)
+          .order("created_at", { ascending: false })
+          .limit(HISTORY_LIMIT);
+        if (!error && data) data.reverse().forEach(renderMessage);
+      } catch {}
+    }
+
     /* ---------- 渲染消息 ---------- */
     function renderMessage(msg) {
       // id 在 REST 返回中是字符串、Realtime 推送中是数字，统一转字符串再去重，
@@ -1127,6 +1212,8 @@
       } else if (data) {
         box.textContent = ""; // 清空输入框
         renderMessage(data); // 本地立即显示，realtime 回传时按 id 去重
+        // 通知同房间其他设备：手机走 Web Push，桌面走对方页面的系统通知
+        notifyRoomPush(content);
       }
 
       sendLock = false;
@@ -1202,6 +1289,135 @@
       });
       return out;
     }
+
+    /* ---------- 新消息提醒（后台 / 其他标签页时） ---------- */
+    // 页面是否在前台：不是隐藏标签页，且窗口没有失去焦点
+    function isPageActive() {
+      return !document.hidden && document.hasFocus();
+    }
+
+    function requestNotifyPermission() {
+      try {
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      } catch {}
+    }
+
+    function notifyMessage(msg) {
+      // 持续提醒：标题闪烁 + 提示音 + 震动始终生效（不依赖权限）；
+      // 系统通知弹窗仅在用户授权后额外弹出
+      newMsgCount++;
+      console.log("[新消息提醒]", msg.nickname, "hidden=" + document.hidden, "focus=" + document.hasFocus());
+      // 1) 系统通知（桌面浏览器；手机浏览器不支持时自动降级）
+      if ("Notification" in window && Notification.permission === "granted" && !pushReady) {
+        try {
+          const n = new Notification(baseTitle, {
+            body: (msg.nickname || "?") + ": " + textOfMsg(msg.content),
+          });
+          // 点击通知回到聊天窗口
+          n.onclick = () => { window.focus(); n.close(); };
+        } catch {}
+      }
+      // 2) 标签页标题闪烁 + 未读数（电脑和手机切换标签页时都能看到）
+      if (!titleTimer) {
+        titleTimer = setInterval(() => {
+          const prefix = "（" + newMsgCount + "条新消息）";
+          document.title = document.title.indexOf("●") === 0
+            ? prefix + baseTitle
+            : "● " + prefix + baseTitle;
+        }, 800);
+      }
+      // 3) 提示音
+      beep();
+      // 4) 震动（安卓手机；iOS 不支持会自动忽略）
+      if (navigator.vibrate) { try { navigator.vibrate(200); } catch {} }
+    }
+
+    // 通知正文里把表情标记显示为 [表情]
+    function textOfMsg(content) {
+      return (content || "").replace(/\[gif:[^\]]+\]/g, "[表情]");
+    }
+
+    function beep() {
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.value = 0.08;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch {}
+    }
+
+    // ---------- Web Push（手机系统通知，Service Worker） ----------
+    function urlBase64ToUint8Array(base64String) {
+      const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(base64);
+      return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    }
+
+    async function registerPush() {
+      // 仅支持的环境才注册（需 HTTPS 或 localhost，file:// 下会被浏览器拒绝）
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !VAPID_PUBLIC_KEY) return;
+      try {
+        const reg = await navigator.serviceWorker.register("sw.js");
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          });
+        }
+        const s = sub.toJSON();
+        if (!s || !s.endpoint) return;
+        // 替换本设备在此房间的旧订阅
+        await sb.from("push_subs").delete().eq("uid", MY_UID);
+        const { error } = await sb.from("push_subs").insert({
+          uid: MY_UID,
+          room_id: currentRoomId,
+          endpoint: s.endpoint,
+          p256dh: s.keys.p256dh,
+          auth: s.keys.auth,
+        });
+        if (!error) pushReady = true;
+      } catch (e) {
+        console.warn("push register failed", e);
+      }
+    }
+
+    // 让 Edge Function 给同房间其他设备发 Web Push（手机端系统通知）
+    function notifyRoomPush(content) {
+      if (!sb) return;
+      sb.functions
+        .invoke("chat-push", {
+          body: {
+            roomId: currentRoomId,
+            title: baseTitle,
+            nickname: myNickname,
+            content: textOfMsg(content),
+            excludeUid: MY_UID,
+          },
+        })
+        .catch(() => {});
+    }
+
+    // 回到页面时清除未读状态，并补齐后台期间错过的消息
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        newMsgCount = 0;
+        if (titleTimer) { clearInterval(titleTimer); titleTimer = null; }
+        document.title = baseTitle;
+        // 实时连接在后台可能被浏览器掐断，回来后拉一次最新消息
+        if (sb && currentRoomId) refreshHistory();
+      }
+    });
 
     /* ---------- 关闭页面时上报离开 ---------- */
     window.addEventListener("beforeunload", () => {

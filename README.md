@@ -12,7 +12,9 @@
 - ⚡ 消息按房间隔离、实时收发（Supabase Realtime）
 - 👥 每房间独立在线人数统计（Presence）
 - 🎙 **实时开麦**：房间内语音通话（WebRTC 点对点，信令经 Supabase Realtime Broadcast）
-- 🌗 **明暗双主题**：默认浅色米白风，右上角一键切回经典黑绿终端风
+- � **GIF 表情**：固定图库点选即发，动图文件随页面一起托管
+- 🔔 **后台新消息提醒**：电脑走系统通知 + 标题闪烁 + 提示音；手机走 Web Push 系统通知
+- �🌗 **明暗双主题**：默认浅色米白风，右上角一键切回经典黑绿终端风
 - 📱 响应式界面，手机 / 电脑均可使用
 - 🛡️ 数据库级防护：匿名请求一律拒绝，只有持有效令牌者才能读写
 - 🛡️ 消息内容以纯文本渲染，防 XSS 注入
@@ -92,6 +94,32 @@ const SUPABASE_ANON_KEY = "sb_publishable_...";       // 你的 anon public key
 | `supabase/functions/chat-login/index.ts` | 服务端登录函数：验证密码、签发会话令牌 |
 | `supabase-setup.sql` | 数据库初始化脚本（建表、RLS 令牌校验、开启 Realtime） |
 | `README.md` | 本文档 |
+
+## 手机推送（Web Push）配置
+
+手机浏览器不支持网页 Notification API，只能通过 **Web Push** 出系统通知。
+
+### 1. 初始化数据库
+
+重新执行 `supabase-setup.sql`（新增 `push_subs` 订阅表）。
+
+### 2. 部署推送函数
+
+1. **Edge Functions → Create a new function**，函数名填 `chat-push`；
+2. 用仓库中 `supabase/functions/chat-push/index.ts` 的内容**全部替换**，点击 **Deploy**；
+3. 配置密钥（Project Settings → Edge Functions → Secrets）新增两个：
+   - `CHAT_VAPID_PRIVATE` = `WEvfp2aMhlaBFonDl-tv20ZKfWrF90rCGZjht1VfWiE`（仓库生成，私钥只放这里，不要写进前端）
+   - `CHAT_SERVICE_ROLE` = service_role key（与 chat-login 相同）
+4. 函数 **Verify JWT 保持开启**（校验房间令牌，防止跨房间推送）；
+5. 再次点击 **Deploy** 使配置生效。
+
+### 3. HTTPS 部署
+
+Service Worker / Push 要求安全上下文：本地测试用 `http://localhost`（Live Server 即可），正式使用部署到 Netlify / Vercel 等 HTTPS 静态托管。`file://` 直接打开无法注册推送。
+
+### 4. 手机使用
+
+手机浏览器打开网站 → 进房后按提示**允许通知**（首次订阅会弹授权）→ 切到后台或锁屏，新消息会以系统通知弹出；点击通知回到聊天页。
 
 ## 常见问题
 
