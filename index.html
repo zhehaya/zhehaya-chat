@@ -542,6 +542,7 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.17 00:40 <b>开麦 / 开摄像头稳定性</b>（修复偶发权限获取失败：约束降级 + 自动重试 + 防连点）<br />
             // 8.17 00:25 <b>视频窗收起/展开</b>（一键收起或展开所有人的视频画面）<br />
             // 8.17 00:10 <b>视频通话</b>（房间内摄像头开关 + 实时视频画面）<br />
             // 8.16 23:05 <b>新消息提醒</b>（后台标题闪烁 / 提示音 / 系统通知 / 手机 Web Push 推送 / 断线自动补消息）<br />
@@ -611,7 +612,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.17-videopanel";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.18-micfix";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -689,6 +690,8 @@
     let micOn = false;       // 是否已开麦
     let camOn = false;       // 是否已开摄像头
     let videoBoxCollapsed = false; // 视频窗是否已收起（手动切换，不影响画面采集）
+    let micBusy = false;      // 开麦申请进行中（防止连点并发弹权限）
+    let camBusy = false;      // 开摄像头申请进行中
 
     // ---- 新消息提醒（后台/其他标签页时）状态 ----
     let baseTitle = ROOM_NAME; // 页面标题基准（进入房间后更新）
@@ -921,6 +924,8 @@
       $("video-box").classList.add("hidden");
       micOn = false;
       camOn = false;
+      micBusy = false;
+      camBusy = false;
       sendLock = false;
       authToken = "";
       sessionStorage.removeItem("room-token");
@@ -1122,41 +1127,95 @@
       updateVideoBox();
     }
 
+    /* ---------- 媒体采集：多约束降级 + 单次重试（提高开麦/开摄像头成功率） ---------- */
+    const MIC_CONSTRAINTS = [
+      { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
+      { audio: true }, // 降级：部分设备不支持上述约束
+    ];
+    const CAM_CONSTRAINTS = [
+      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } },
+      { video: true }, // 降级
+    ];
+
+    // 依次尝试多组约束；设备被占用等瞬时错误等待后整体重试一轮。
+    // 不再预查 permissions.query —— 部分浏览器会误报 denied 或抛错导致偶发失败，
+    // 直接尝试 getUserMedia 更可靠（真被拒绝时浏览器不会弹窗、立即 reject）。
+    async function getUserMediaSafe(constraintsList, retryMs = 700) {
+      if (!window.isSecureContext || !navigator.mediaDevices) {
+        const err = new Error("media requires HTTPS or localhost");
+        err.name = "SecurityError";
+        throw err;
+      }
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, retryMs));
+        for (const constraints of constraintsList) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            if (stream && stream.getTracks().length) return stream;
+            stream.getTracks().forEach((t) => t.stop()); // 空流：继续尝试下一组约束
+          } catch (err) {
+            lastErr = err;
+            // 权限被拒 / 无设备 / 非安全上下文：重试无意义，直接抛出
+            if (
+              err.name === "NotAllowedError" ||
+              err.name === "PermissionDeniedError" ||
+              err.name === "NotFoundError" ||
+              err.name === "SecurityError"
+            ) throw err;
+            // NotReadableError / OverconstrainedError / AbortError 等瞬时错误：换约束或稍后重试
+          }
+        }
+      }
+      throw lastErr || new Error("getUserMedia failed");
+    }
+
+    function micErrTip(err) {
+      if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
+        addSysTip("-- [!] 麦克风权限被拒绝：点击地址栏左侧的锁/权限图标允许麦克风，或稍后重试 --");
+      } else if (err && err.name === "NotFoundError") {
+        addSysTip("-- [!] 未检测到麦克风设备，请检查设备连接 --");
+      } else if (err && err.name === "NotReadableError") {
+        addSysTip("-- [!] 麦克风被其他应用占用，请关闭占用程序后重试 --");
+      } else if (err && err.name === "SecurityError") {
+        addSysTip("-- [!] 当前环境不支持麦克风：请用 HTTPS 或 localhost 打开页面 --");
+      } else {
+        addSysTip("-- [!] 开麦失败，请稍后重试（需要麦克风权限，HTTPS / localhost）--");
+      }
+    }
+
     async function toggleMic() {
       const btn = $("mic-btn");
       if (!micOn) {
+        if (micBusy) return; // 权限弹窗进行中：忽略重复点击，防止并发申请互相冲突
+        micBusy = true;
         // 即使实时频道尚未连接，也允许先申请麦克风；连接就绪后状态会自动同步
         btn.disabled = true;
         try {
           if (localStream) {
-            // 已经获得过麦克风授权：直接恢复，不再询问
-            localStream.getAudioTracks().forEach((t) => (t.enabled = true));
-          } else {
-            // 还没有可用流：先看权限状态，只有需要时才向浏览器申请
-            try {
-              const status = await navigator.permissions.query({ name: "microphone" });
-              if (status.state === "denied") {
-                addSysTip("-- [!] 麦克风权限被拒绝 --");
-                return;
-              }
-            } catch { /* 部分浏览器不支持 permissions.query，直接走 getUserMedia */ }
-
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const track = localStream.getAudioTracks()[0];
-            for (const [, entry] of pcMap) entry.pc.addTrack(track, localStream);
+            // 已有流：轨道还活着就直接恢复（不再询问）；设备被拔出等导致失效则重新申请
+            const alive = localStream.getAudioTracks().filter((t) => t.readyState === "live");
+            if (alive.length) {
+              alive.forEach((t) => (t.enabled = true));
+              micOn = true;
+              btn.textContent = "[麦克风: ON]";
+              btn.classList.add("on");
+              await updatePresence();
+              return;
+            }
+            localStream = null;
           }
+          localStream = await getUserMediaSafe(MIC_CONSTRAINTS);
+          const track = localStream.getAudioTracks()[0];
+          if (!track) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
+          for (const [, entry] of pcMap) entry.pc.addTrack(track, localStream);
           micOn = true;
         } catch (err) {
           console.error(err);
-          if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
-            addSysTip("-- [!] 麦克风权限被拒绝 --");
-          } else if (err && err.name === "NotFoundError") {
-            addSysTip("-- [!] 未检测到麦克风设备，请检查设备连接 --");
-          } else {
-            addSysTip("-- [!] 开麦失败：需要麦克风权限（HTTPS / localhost 才能开麦）--");
-          }
+          micErrTip(err);
           return;
         } finally {
+          micBusy = false;
           btn.disabled = false;
         }
       } else {
@@ -1237,43 +1296,53 @@
       updateVideoBox();
     }
 
+    function camErrTip(err) {
+      if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
+        addSysTip("-- [!] 摄像头权限被拒绝：点击地址栏左侧的锁/权限图标允许摄像头，或稍后重试 --");
+      } else if (err && err.name === "NotFoundError") {
+        addSysTip("-- [!] 未检测到摄像头设备，请检查设备连接 --");
+      } else if (err && err.name === "NotReadableError") {
+        addSysTip("-- [!] 摄像头被其他应用占用，请关闭占用程序后重试 --");
+      } else if (err && err.name === "SecurityError") {
+        addSysTip("-- [!] 当前环境不支持摄像头：请用 HTTPS 或 localhost 打开页面 --");
+      } else {
+        addSysTip("-- [!] 开启摄像头失败，请稍后重试（需要摄像头权限，HTTPS / localhost）--");
+      }
+    }
+
     async function toggleCam() {
       const btn = $("cam-btn");
       if (!camOn) {
+        if (camBusy) return; // 权限弹窗进行中：忽略重复点击，防止并发申请互相冲突
+        camBusy = true;
         btn.disabled = true;
         try {
           if (localCamStream) {
-            // 已经获得过摄像头授权：直接恢复
-            localCamStream.getVideoTracks().forEach((t) => (t.enabled = true));
-          } else {
-            try {
-              const status = await navigator.permissions.query({ name: "camera" });
-              if (status.state === "denied") {
-                addSysTip("-- [!] 摄像头权限被拒绝 --");
-                return;
-              }
-            } catch { /* 部分浏览器不支持 permissions.query，直接走 getUserMedia */ }
-            localCamStream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-            });
-            const track = localCamStream.getVideoTracks()[0];
-            for (const [, entry] of pcMap) entry.pc.addTrack(track, localCamStream);
+            // 已有流：轨道还活着就直接恢复；设备被拔出等导致失效则重新申请
+            const alive = localCamStream.getVideoTracks().filter((t) => t.readyState === "live");
+            if (alive.length) {
+              alive.forEach((t) => (t.enabled = true));
+              camOn = true;
+              showLocalVideo();
+              btn.textContent = "[摄像头: ON]";
+              btn.classList.add("on");
+              await updatePresence();
+              return;
+            }
+            localCamStream = null;
           }
+          localCamStream = await getUserMediaSafe(CAM_CONSTRAINTS);
+          const track = localCamStream.getVideoTracks()[0];
+          if (!track) throw Object.assign(new Error("no video track"), { name: "NotFoundError" });
+          for (const [, entry] of pcMap) entry.pc.addTrack(track, localCamStream);
           camOn = true;
           showLocalVideo();
         } catch (err) {
           console.error(err);
-          if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) {
-            addSysTip("-- [!] 摄像头权限被拒绝 --");
-          } else if (err && err.name === "NotFoundError") {
-            addSysTip("-- [!] 未检测到摄像头设备，请检查设备连接 --");
-          } else if (err && err.name === "NotReadableError") {
-            addSysTip("-- [!] 摄像头被其他应用占用 --");
-          } else {
-            addSysTip("-- [!] 开启摄像头失败：需要 HTTPS / localhost --");
-          }
+          camErrTip(err);
           return;
         } finally {
+          camBusy = false;
           btn.disabled = false;
         }
       } else {
