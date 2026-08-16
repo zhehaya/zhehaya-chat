@@ -1447,8 +1447,7 @@
           pushTip("-- 手机推送已开启：刚才的验证通知就是完整链路 --");
         } else {
           pushReady = false; // 推送不通时保留桌面/标题提醒兜底
-          const reason = (data && data.errors && data.errors[0]) ||
-            (error && error.message) || "未知原因";
+          const reason = serverErrorText(error, data);
           console.warn("[push] 验证推送失败", error, data);
           addSysTip("-- [!] 推送验证失败：" + reason + " --");
         }
@@ -1460,6 +1459,13 @@
     }
 
     let pushFailTipShown = false;
+    // 提取 Edge Function 返回的真实错误文本（json.error 或上下文）
+    function serverErrorText(error, data) {
+      const json = (error && error.context && error.context.json) || {};
+      const firstDataErr = (data && data.errors && data.errors[0]);
+      return json.error || json.message || firstDataErr ||
+        (error && error.message) || "未知原因";
+    }
     // 让 Edge Function 给同房间其他设备发 Web Push（手机端系统通知）
     async function notifyRoomPush(content) {
       if (!sb) return;
@@ -1480,9 +1486,7 @@
           console.warn("[push] 推送发送异常", error, data);
           if (!pushFailTipShown) {
             pushFailTipShown = true;
-            const reason = (data && data.errors && data.errors[0]) ||
-              (error && error.message) || "未知原因";
-            addSysTip("-- [!] 推送发送失败：" + reason + "（检查 chat-push 部署与密钥）--");
+            addSysTip("-- [!] 推送发送失败：" + serverErrorText(error, data) + " --");
           }
         }
       } catch (e) {
