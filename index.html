@@ -6,6 +6,10 @@
   <title>zhehaya chat</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="gifs/list.js"></script>
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="zhehaya chat" />
+  <link rel="manifest" href="manifest.webmanifest" />
   <style>
     :root {
       --bg: #0a0a0a;
@@ -499,6 +503,7 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.16 23:01 <b>手机推送强化</b>（环境检测与提示 / PWA 支持 / 震动）<br />
             // 8.16 22:48 <b>手机系统通知</b>（Web Push：电脑网页通知 / 手机推送）<br />
             // 8.16 22:42 <b>持续消息监控</b>（断线重连 / 回前台自动补消息）<br />
             // 8.16 22:38 <b>进房即申请通知权限</b>（允许才提醒，移除测试按钮）<br />
@@ -566,7 +571,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.13-push";                     // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.14-mpush";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -871,6 +876,7 @@
       // 移除本设备的推送订阅（离开房间后不再接收该房间推送）
       try { if (sb) sb.from("push_subs").delete().eq("uid", MY_UID); } catch {}
       pushReady = false;
+      pushTipShown = false;
       // 重置新消息提醒状态
       newMsgCount = 0;
       if (titleTimer) { clearInterval(titleTimer); titleTimer = null; }
@@ -1364,12 +1370,23 @@
     }
 
     async function registerPush() {
-      // 仅支持的环境才注册（需 HTTPS 或 localhost，file:// 下会被浏览器拒绝）
-      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !VAPID_PUBLIC_KEY) return;
+      // 手机浏览器只能靠 Web Push 出系统通知，注册条件：HTTPS 或 localhost
+      if (!window.isSecureContext) {
+        console.warn("[push] 非安全上下文（file:// 等），无法注册");
+        pushTip("-- [!] 手机推送未开启：需要 HTTPS 或 localhost（file:// 不支持）--");
+        return;
+      }
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !VAPID_PUBLIC_KEY) {
+        console.warn("[push] 浏览器不支持 Service Worker / Push");
+        pushTip("-- [!] 当前浏览器不支持手机推送，请换 Chrome / Edge / Safari --");
+        return;
+      }
       try {
+        console.log("[push] 注册 Service Worker...");
         const reg = await navigator.serviceWorker.register("sw.js");
         let sub = await reg.pushManager.getSubscription();
         if (!sub) {
+          console.log("[push] 申请推送订阅（浏览器会弹授权）...");
           sub = await reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
@@ -1386,10 +1403,24 @@
           p256dh: s.keys.p256dh,
           auth: s.keys.auth,
         });
-        if (!error) pushReady = true;
+        if (!error) {
+          pushReady = true;
+          console.log("[push] 订阅已保存，手机推送就绪");
+          pushTip("-- 手机推送已开启：切到后台也能收到新消息通知 --");
+        } else {
+          console.warn("[push] 订阅保存失败", error);
+        }
       } catch (e) {
-        console.warn("push register failed", e);
+        console.warn("[push] 注册失败", e);
+        pushTip("-- [!] 手机推送开启失败：请确认允许了通知权限 --");
       }
+    }
+
+    let pushTipShown = false;
+    function pushTip(text) {
+      if (pushTipShown) return;
+      pushTipShown = true;
+      addSysTip(text);
     }
 
     // 让 Edge Function 给同房间其他设备发 Web Push（手机端系统通知）

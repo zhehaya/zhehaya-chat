@@ -11,7 +11,8 @@ self.addEventListener("push", (event) => {
       icon: "gifs/1.gif",
       badge: "gifs/1.gif",
       tag: "zhehaya-msg",
-      data: { url: data.url || "/" },
+      vibrate: [100, 50, 100], // 手机震动
+      data: { url: data.url || "./" },
     })
   );
 });
@@ -19,15 +20,16 @@ self.addEventListener("push", (event) => {
 // 点击通知：聚焦 / 打开聊天页面
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const url = event.notification.data.url || self.registration.scope;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) {
         if ("focus" in c) {
-          c.navigate(event.notification.data.url || "/");
+          c.navigate(url);
           return c.focus();
         }
       }
-      return self.clients.openWindow(event.notification.data.url || "/");
+      return self.clients.openWindow(url);
     })
   );
 });
