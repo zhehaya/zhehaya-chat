@@ -244,7 +244,7 @@
     <div class="login-card">
       <div class="logo">&gt;_</div>
       <h1>zhehaya chat</h1>
-      <p class="sub">TERMINAL ROOM // ANONYMOUS</p>
+      <p class="sub">TERMINAL ROOM // ANONYMOUS // <span id="app-version"></span></p>
 
       <div id="setup-hint" class="setup-hint hidden">
         [!] 尚未配置 Supabase：请打开 <b>index.html</b>，
@@ -306,6 +306,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
+    const APP_VERSION      = "v3.0-multiroom";                   // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -318,6 +319,7 @@
       SUPABASE_ANON_KEY.length > 20;
 
     const $ = (id) => document.getElementById(id);
+    $("app-version").textContent = APP_VERSION; // 登录页显示版本号
 
     /* ---------- 匿名身份 ---------- */
     function genHandle() {
