@@ -8,12 +8,37 @@
   <style>
     :root {
       --bg: #0a0a0a;
+      --panel: #0d0d0d;
+      --field: #000;
       --fg: #3dff7c;
       --fg-dim: #1d8a46;
       --fg-faint: #144d2a;
       --border: #2b2b2b;
       --danger: #ff4d4d;
       --warn: #ffb800;
+      --msg-body: #d6ffe4;
+      --btn-hover-text: #000;
+      --scroll-thumb: #1f1f1f;
+      --hint-bg: rgba(255, 184, 0, 0.06);
+      --hint-border: rgba(255, 184, 0, 0.35);
+    }
+
+    /* 浅色主题（默认）：米白纸底 + 深绿文字，保留终端感 */
+    :root.light {
+      --bg: #f4f1e8;
+      --panel: #fffdf6;
+      --field: #ffffff;
+      --fg: #0c6b2e;
+      --fg-dim: #3d8b55;
+      --fg-faint: #87a68a;
+      --border: #c9c3b0;
+      --danger: #c62828;
+      --warn: #8a6400;
+      --msg-body: #164d2b;
+      --btn-hover-text: #ffffff;
+      --scroll-thumb: #d9d3c2;
+      --hint-bg: rgba(138, 100, 0, 0.08);
+      --hint-border: rgba(138, 100, 0, 0.4);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -42,12 +67,19 @@
 
     .login-card {
       width: min(420px, calc(100vw - 40px));
-      background: #0d0d0d;
+      background: var(--panel);
       border: 1px solid var(--border);
       padding: 30px 32px 28px;
       text-align: left;
     }
 
+    .logo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .logo-row .logo { margin-bottom: 0; }
     .logo { font-size: 28px; margin-bottom: 16px; }
     .login-card h1 { font-size: 24px; font-weight: 700; letter-spacing: 3px; }
     .login-card .sub {
@@ -58,7 +90,7 @@
     .field {
       display: flex; align-items: center;
       border: 1px solid var(--border);
-      background: #000;
+      background: var(--field);
     }
     .field:focus-within { border-color: var(--fg); }
     .field + .field { margin-top: 10px; }
@@ -84,8 +116,20 @@
       font-family: inherit;
       cursor: pointer;
     }
-    .btn:hover, .btn:active { background: var(--fg); color: #000; }
+    .btn:hover, .btn:active { background: var(--fg); color: var(--btn-hover-text); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .theme-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg-dim);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+    .theme-btn:hover { border-color: var(--fg); color: var(--fg); }
 
     .error-tip {
       margin-top: 12px;
@@ -103,8 +147,8 @@
       padding: 10px 12px;
       font-size: 12px; line-height: 1.7;
       color: var(--warn);
-      background: rgba(255, 184, 0, 0.06);
-      border: 1px solid rgba(255, 184, 0, 0.35);
+      background: var(--hint-bg);
+      border: 1px solid var(--hint-border);
     }
 
     .footer-note {
@@ -127,7 +171,7 @@
       min-height: 400px;
       display: flex;
       flex-direction: column;
-      background: #0d0d0d;
+      background: var(--panel);
       border: 1px solid var(--border);
       overflow: hidden;
     }
@@ -173,7 +217,7 @@
       cursor: pointer;
     }
     .mic-btn:hover { border-color: var(--fg); color: var(--fg); }
-    .mic-btn.on { border-color: var(--fg); background: var(--fg); color: #000; }
+    .mic-btn.on { border-color: var(--fg); background: var(--fg); color: var(--btn-hover-text); }
     .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .online-box { font-size: 12px; color: var(--fg-dim); letter-spacing: 1px; }
     .online-box b { color: var(--fg); font-size: 13px; }
@@ -185,7 +229,7 @@
       scroll-behavior: smooth;
     }
     .msg-list::-webkit-scrollbar { width: 8px; }
-    .msg-list::-webkit-scrollbar-thumb { background: #1f1f1f; }
+    .msg-list::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
     .msg-list::-webkit-scrollbar-track { background: transparent; }
 
     .msg {
@@ -201,7 +245,7 @@
     }
     .msg .t { color: var(--fg-faint); }
     .msg .n { color: var(--fg-dim); }
-    .msg .c { color: #d6ffe4; white-space: pre-wrap; }
+    .msg .c { color: var(--msg-body); white-space: pre-wrap; }
     .msg.me .t { color: var(--fg-dim); }
     .msg.me .n { color: var(--fg); }
     .msg.me .c { color: var(--fg); }
@@ -222,7 +266,7 @@
       min-width: 0;
       padding: 10px 12px;
       border: 1px solid var(--border);
-      background: #000;
+      background: var(--field);
       color: var(--fg);
       font-size: 14px;
       font-family: inherit; caret-color: var(--fg);
@@ -238,7 +282,7 @@
       font-family: inherit;
       cursor: pointer;
     }
-    .send-btn:hover, .send-btn:active { background: var(--fg); color: #000; }
+    .send-btn:hover, .send-btn:active { background: var(--fg); color: var(--btn-hover-text); }
     .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .jump-btn {
@@ -248,13 +292,13 @@
       transform: translateX(-50%);
       padding: 6px 12px;
       border: 1px solid var(--fg);
-      background: #000;
+      background: var(--field);
       color: var(--fg);
       font-family: inherit;
       font-size: 12px;
       cursor: pointer;
     }
-    .jump-btn:hover { background: var(--fg); color: #000; }
+    .jump-btn:hover { background: var(--fg); color: var(--btn-hover-text); }
 
     @media (max-width: 640px) {
       .chat-shell { width: 100vw; height: 100dvh; min-height: 0; border: none; }
@@ -280,20 +324,32 @@
       .header-right {
         width: 100%;
         justify-content: flex-end;
+        flex-wrap: wrap;
         gap: 8px;
       }
       .mic-btn, .leave-btn { padding: 6px 12px; font-size: 12px; }
     }
   </style>
+  <script>
+    // 主题：默认浅色，可切换（在 body 渲染前应用，避免暗色闪烁）
+    try {
+      if ((localStorage.getItem("zhehaya-theme") || "light") === "light") {
+        document.documentElement.classList.add("light");
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
 
   <!-- ================= 登录界面 ================= -->
   <div id="login-view" class="view">
     <div class="login-card">
-      <div class="logo">&gt;_</div>
+      <div class="logo-row">
+        <div class="logo">&gt;_</div>
+        <button class="theme-btn" type="button" title="切换明暗主题">[☾ 暗色]</button>
+      </div>
       <h1>zhehaya chat</h1>
-      <p class="sub">TERMINAL ROOM // ANONYMOUS // <span id="app-version"></span></p>
+      <p class="sub">终端房间 // 匿名 // <span id="app-version"></span></p>
 
       <div id="setup-hint" class="setup-hint hidden">
         [!] 尚未配置 Supabase：请打开 <b>index.html</b>，
@@ -303,26 +359,28 @@
 
       <div class="field">
         <span class="icon">#</span>
-        <input id="room-input" type="text" placeholder="room (不存在将自动创建)" maxlength="24" autocomplete="off" />
+        <input id="room-input" type="text" placeholder="房间号(不存在将自动创建)" maxlength="24" autocomplete="off" />
       </div>
 
       <div class="field">
         <span class="icon">@</span>
-        <input id="nickname-input" type="text" placeholder="nickname (blank = random)" maxlength="16" autocomplete="off" />
+        <input id="nickname-input" type="text" placeholder="昵称" maxlength="16" autocomplete="off" />
       </div>
 
       <div class="field">
         <span class="icon">&gt;</span>
-        <input id="password-input" type="password" placeholder="password" maxlength="32" autocomplete="off" />
+        <input id="password-input" type="password" placeholder="该房间的密码" maxlength="32" autocomplete="off" />
       </div>
-      <div id="login-error" class="error-tip hidden">* ACCESS DENIED — 密码错误</div>
-      <button id="login-btn" class="btn">[ ENTER ]</button>
+      <div id="login-error" class="error-tip hidden">* 拒绝访问 — 房间密码错误</div>
+      <button id="login-btn" class="btn">[ 进入 ]</button>
 
       <div class="footer-note">
-        // 已支持 <b>多房间</b> 与 <b>自定义昵称</b><br />
-        // room：房间号，不存在将自动创建（留空进默认房间）<br />
-        // nickname：昵称，留空随机生成 guest_xxxx<br />
-        // password：该房间的密码
+        // 房间号不存在将自动创建（留空进默认房间）<br />
+        // 密码在房间不存在时将为此房间密码<br />
+        // 昵称留空随机生成 guest_xxxx<br />
+        // upd 8.16 <b>中文</b>与<b>亮暗色交换</b><br />
+        // upd 8.16 <b>开麦功能</b><br />
+        // upd 8.16 <b>多房间</b> 与 <b>自定义昵称</b><br />
       </div>
     </div>
   </div>
@@ -335,23 +393,24 @@
           <span id="conn-dot" class="dot"></span>
           <strong id="room-name">zhehaya chat</strong>
           <span id="room-tag" class="room-tag">#---</span>
-          <span id="conn-text" class="conn-text">[LINK: ...]</span>
+          <span id="conn-text" class="conn-text">[连接: ...]</span>
         </div>
         <div class="header-right">
-          <div class="online-box">[ONLINE: <b id="online-count">0</b>]</div>
-          <div class="online-box">[VOICE: <b id="voice-count">0</b>]</div>
-          <button id="mic-btn" class="mic-btn" title="开麦 / 闭麦">[MIC: OFF]</button>
-          <button id="leave-btn" class="leave-btn">[LEAVE]</button>
+          <button class="theme-btn" type="button" title="切换明暗主题">[☾ 暗色]</button>
+          <div class="online-box">[在线: <b id="online-count">0</b>]</div>
+          <div class="online-box">[语音: <b id="voice-count">0</b>]</div>
+          <button id="mic-btn" class="mic-btn" title="开麦 / 闭麦">[麦克风: OFF]</button>
+          <button id="leave-btn" class="leave-btn">[离开]</button>
         </div>
       </header>
 
       <main id="msg-list" class="msg-list"></main>
 
-      <button id="jump-btn" class="jump-btn hidden">[ NEW MSG ]</button>
+      <button id="jump-btn" class="jump-btn hidden">[ 新消息 ]</button>
 
       <footer class="chat-footer">
-        <input id="message-input" type="text" placeholder="&gt; message... (Enter 发送)" maxlength="500" />
-        <button id="send-btn" class="send-btn">[SEND]</button>
+        <input id="message-input" type="text" placeholder="&gt; 输入消息... (Enter 发送)" maxlength="500" />
+        <button id="send-btn" class="send-btn">[发送]</button>
       </footer>
     </div>
     <div id="voice-box" aria-hidden="true"></div>
@@ -365,7 +424,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.0-voice";                      // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.2-zh";                        // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -380,6 +439,23 @@
 
     const $ = (id) => document.getElementById(id);
     $("app-version").textContent = APP_VERSION; // 登录页显示版本号
+
+    /* ---------- 明暗主题切换 ---------- */
+    const THEME_KEY = "zhehaya-theme";
+    function applyTheme(theme) {
+      document.documentElement.classList.toggle("light", theme === "light");
+      document.querySelectorAll(".theme-btn").forEach((b) => {
+        b.textContent = theme === "light" ? "[☾ 暗色]" : "[☀ 浅色]";
+      });
+    }
+    applyTheme(document.documentElement.classList.contains("light") ? "light" : "dark");
+    document.querySelectorAll(".theme-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        const next = document.documentElement.classList.contains("light") ? "dark" : "light";
+        try { localStorage.setItem(THEME_KEY, next); } catch {}
+        applyTheme(next);
+      });
+    });
 
     /* ---------- 匿名身份 ---------- */
     function genHandle() {
@@ -450,7 +526,7 @@
       const roomId = ($("room-input").value.trim() || DEFAULT_ROOM).toLowerCase();
       if (!pwd) return;
       if (!ROOM_ID_RE.test(roomId)) {
-        showLoginError("* INVALID ROOM ID — 2-24 位字母 / 数字 / - / _");
+        showLoginError("* 房间号不合法 — 2-24 位字母 / 数字 / - / _");
         $("room-input").focus();
         return;
       }
@@ -468,19 +544,19 @@
           try {
             serverMsg = (error && error.context && error.context.error) || "";
           } catch { serverMsg = ""; }
-          let msg = "* ACCESS DENIED — 房间密码错误";
+          let msg = "* 拒绝访问 — 房间密码错误";
           if (/invalid room id/i.test(serverMsg)) {
-            msg = "* INVALID ROOM ID — 房间号不合法";
+            msg = "* 房间号不合法 — 房间号格式错误";
           } else if (/access denied/i.test(serverMsg)) {
-            msg = "* ACCESS DENIED — 房间密码错误";
+            msg = "* 拒绝访问 — 房间密码错误";
           } else if (/service_role/i.test(serverMsg)) {
-            msg = "* SERVER NOT CONFIGURED — 函数缺少 CHAT_SERVICE_ROLE 密钥";
+            msg = "* 服务端未配置 — 函数缺少 CHAT_SERVICE_ROLE 密钥";
           } else if (/jwt_secret/i.test(serverMsg)) {
-            msg = "* SERVER NOT CONFIGURED — 函数缺少 CHAT_JWT_SECRET 密钥";
+            msg = "* 服务端未配置 — 函数缺少 CHAT_JWT_SECRET 密钥";
           } else if (/db error/i.test(serverMsg)) {
-            msg = "* DATABASE ERROR — " + serverMsg;
+            msg = "* 数据库错误 — " + serverMsg;
           } else if (serverMsg) {
-            msg = "* SERVER: " + serverMsg;
+            msg = "* 服务端: " + serverMsg;
           }
           showLoginError(msg);
           $("password-input").value = "";
@@ -501,7 +577,7 @@
         }
       } catch (err) {
         console.error(err);
-        showLoginError("* NETWORK ERROR — 无法连接服务端，请检查网络后重试");
+        showLoginError("* 网络错误 — 无法连接服务端，请检查网络后重试");
       } finally {
         btn.disabled = false;
       }
@@ -562,12 +638,12 @@
           setConn(true);
           await channel.track({ online_at: new Date().toISOString(), voice: false });
           if (roomCreated) {
-            addSysTip(`-- [!] room [#${currentRoomId}] not found → created, you are the owner --`);
+            addSysTip(`-- [!] 房间 [#${currentRoomId}] 不存在 → 已自动创建，你是房主 --`);
           }
-          addSysTip(`-- joined room [#${currentRoomId}] --`);
+          addSysTip(`-- 已加入房间 [#${currentRoomId}] --`);
           loadHistory();
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setConn(false, "[LINK: ERROR]");
+          setConn(false, "[连接: 异常]");
         }
       });
 
@@ -601,7 +677,7 @@
 
     function setConn(ok, text) {
       $("conn-dot").classList.toggle("offline", !ok);
-      $("conn-text").textContent = text || (ok ? "[LINK: OK]" : "[LINK: DOWN]");
+      $("conn-text").textContent = text || (ok ? "[连接: OK]" : "[连接: 断开]");
     }
 
     function handlePresenceSync() {
@@ -717,7 +793,7 @@
 
     async function toggleMic() {
       if (!channel || channel.state !== "joined") {
-        addSysTip("-- [!] voice link not ready --");
+        addSysTip("-- [!] 语音连接未就绪 --");
         return;
       }
       const btn = $("mic-btn");
@@ -735,7 +811,7 @@
           micOn = true;
         } catch (err) {
           console.error(err);
-          addSysTip("-- [!] mic failed: 需要麦克风权限（HTTPS / localhost 才能开麦）--");
+          addSysTip("-- [!] 开麦失败：需要麦克风权限（HTTPS / localhost 才能开麦）--");
           return;
         } finally {
           btn.disabled = false;
@@ -744,7 +820,7 @@
         localStream.getAudioTracks().forEach((t) => (t.enabled = false));
         micOn = false;
       }
-      btn.textContent = micOn ? "[MIC: ON]" : "[MIC: OFF]";
+      btn.textContent = micOn ? "[麦克风: ON]" : "[麦克风: OFF]";
       btn.classList.toggle("on", micOn);
       channel.track({ online_at: new Date().toISOString(), voice: micOn });
     }
@@ -759,14 +835,14 @@
         .limit(HISTORY_LIMIT);
       if (error) {
         if (handleAuthError(error)) return;
-        addSysTip("-- [!] history load failed: " + error.message);
+        addSysTip("-- [!] 历史消息加载失败: " + error.message);
         return;
       }
       if (data.length) {
-        addSysTip(`-- last ${data.length} messages --`);
+        addSysTip(`-- 最近 ${data.length} 条消息 --`);
         data.reverse().forEach(renderMessage);
       } else {
-        addSysTip("-- no messages yet --");
+        addSysTip("-- 暂无消息 --");
       }
       scrollToBottom();
     }
@@ -790,7 +866,7 @@
 
       const n = document.createElement("span");
       n.className = "n";
-      n.textContent = (msg.nickname === myNickname ? "you" : msg.nickname) + "> ";
+      n.textContent = (msg.nickname === myNickname ? "我" : msg.nickname) + "> ";
 
       const c = document.createElement("span");
       c.className = "c";
@@ -830,7 +906,7 @@
       const input = $("message-input");
       const content = input.value.trim();
       if (!content || sendLock) return;
-      if (!sb) { addSysTip("-- [!] link not ready --"); return; }
+      if (!sb) { addSysTip("-- [!] 连接未就绪 --"); return; }
 
       sendLock = true;
       $("send-btn").disabled = true;
@@ -843,7 +919,7 @@
 
       if (error) {
         if (handleAuthError(error)) return;
-        addSysTip("-- [!] send failed: " + error.message);
+        addSysTip("-- [!] 发送失败: " + error.message);
       } else if (data) {
         input.value = "";
         renderMessage(data); // 本地立即显示，realtime 回传时按 id 去重
