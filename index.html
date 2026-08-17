@@ -176,14 +176,36 @@
       color: var(--fg-dim);
     }
     .upd-log summary::-webkit-details-marker { display: none; }
-    .upd-log summary::before { content: "▸ "; color: var(--fg); }
-    .upd-log[open] summary::before { content: "▾ "; }
+    .upd-log > summary::before { content: "▸ "; color: var(--fg); }
+    .upd-log[open] > summary::before { content: "▾ "; }
     .upd-log summary:hover { color: var(--fg); }
     .upd-body {
       margin-top: 8px;
       padding-left: 14px;
       border-left: 1px solid var(--border);
+      /* 日志太长时限制高度，区域内滚动 */
+      max-height: 180px;
+      overflow-y: auto;
     }
+    .upd-body::-webkit-scrollbar { width: 6px; }
+    .upd-body::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+    .upd-body::-webkit-scrollbar-track { background: transparent; }
+
+    /* 日志里的嵌套可展开条目（如视频通话优化） */
+    .upd-log.sub { margin: 3px 0 3px 4px; }
+    .upd-log.sub summary { font-size: 11px; }
+    .upd-sub {
+      margin-top: 6px;
+      padding-left: 12px;
+      border-left: 1px solid var(--border);
+      font-size: 11px;
+      line-height: 1.9;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .upd-sub::-webkit-scrollbar { width: 6px; }
+    .upd-sub::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+    .upd-sub::-webkit-scrollbar-track { background: transparent; }
 
     /* ---------- 聊天界面 ---------- */
     #chat-view { flex-direction: column; z-index: 1; }
@@ -536,29 +558,28 @@
       <button id="login-btn" class="btn">[ 进入 ]</button>
 
       <div class="footer-note">
-        // 房间号不存在将自动创建（留空进默认房间）<br />
-        // 密码在房间不存在时将为此房间密码<br />
-        // 昵称留空随机生成 guest_xxxx<br />
+         房间号不存在将自动创建（留空进默认房间）<br />
+         密码在房间不存在时将为此房间密码<br />
+         昵称留空随机生成 guest_xxxx<br />
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
-            // 8.17 03:20 <b>语音/视频双连接隔离</b>（开视频不再打断语音；关摄像头画面即时移除不再卡住，请全员刷新页面）<br />
-            // 8.17 02:40 <b>后台回来自动重连</b>（修复手机切后台后收不到新消息/看不到新进房者的下行失效问题）<br />
-            // 8.17 02:10 <b>全面加固</b>（麦克风/摄像头意外断开自动恢复、视频兼容 Safari、修复加轨异常导致的人数冻结）<br />
-            // 8.17 01:40 <b>修复语音/视频偶发中断</b>（ICE 候选竞态丢失 + 断线自动重建 + 15 秒心跳自愈）<br />
-            // 8.17 01:10 <b>修复人数/语音数显示错误</b>（离开者残留、重进后听不到/看不到对方的问题）<br />
-            // 8.17 00:40 <b>开麦 / 开摄像头稳定性</b>（修复偶发权限获取失败：约束降级 + 自动重试 + 防连点）<br />
-            // 8.17 00:25 <b>视频窗收起/展开</b>（一键收起或展开所有人的视频画面）<br />
-            // 8.17 00:10 <b>视频通话</b>（房间内摄像头开关 + 实时视频画面）<br />
-            // 8.16 23:05 <b>新消息提醒</b>（后台标题闪烁 / 提示音 / 系统通知 / 手机 Web Push 推送 / 断线自动补消息）<br />
-            // 8.16 22:34 <b>离开房间不再刷新页面</b>（修复沙箱环境 reload 报错）<br />
-            // 8.16 22:11 <b>输入框直接显示表情</b>（按钮改为「表情」）<br />
-            // 8.16 21:50 <b>表情支持与文字混排</b><br />
-            // 8.16 21:20 <b>表情功能</b>（本地 gifs 图库点选发送）<br />
-            // 8.16 20:40 <b>麦克风权限优化</b><br />
-            // 8.16 20:10 <b>中文界面</b> 与 <b>明暗主题切换</b><br />
-            // 8.16 19:30 <b>开麦功能</b>（WebRTC 实时语音通话）<br />
-            // 8.16 19:00 <b>多房间</b> 与 <b>自定义昵称</b>
+             <details class="upd-log sub">
+              <summary> 8.17 上午<b>视频通话</b>（摄像头开关 / 实时画面 / 视频窗收起展开）（点击展开详情）</summary>
+              <div class="upd-sub">
+                语音·视频双连接隔离：开视频不打断语音、关摄像头画面即时移除，不再卡住；断线自动重建；麦克风/摄像头意外断开自动恢复；兼容 Safari
+              </div>
+            </details>
+             8.16 23:40 <b>修复人数/语音数显示错误</b>（离开者残留、重进后听不到/看不到对方的问题）<br />
+             8.16 23:05 <b>新消息提醒</b>（后台标题闪烁 / 提示音 / 系统通知 / 手机 Web Push 推送 / 断线自动补消息）<br />
+             8.16 22:34 <b>离开房间不再刷新页面</b>（修复沙箱环境 reload 报错）<br />
+             8.16 22:11 <b>输入框直接显示表情</b>（按钮改为「表情」）<br />
+             8.16 21:50 <b>表情支持与文字混排</b><br />
+             8.16 21:20 <b>表情功能</b>（本地 gifs 图库点选发送）<br />
+             8.16 20:40 <b>麦克风权限优化</b><br />
+             8.16 20:10 <b>中文界面</b> 与 <b>明暗主题切换</b><br />
+             8.16 15:30 <b>开麦功能</b>（WebRTC 实时语音通话）<br />
+             8.16 9:00 <b>多房间</b> 与 <b>自定义昵称</b>
           </div>
         </details>
       </div>

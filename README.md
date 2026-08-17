@@ -95,6 +95,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_...";       // 你的 anon public key
 | `index.html` | 主页：登录 + 文字聊天 + 语音通话 + 全部前端逻辑（单文件应用） |
 | `supabase/functions/chat-login/index.ts` | 服务端登录函数：验证密码、签发会话令牌 |
 | `supabase-setup.sql` | 数据库初始化脚本（建表、RLS 令牌校验、开启 Realtime） |
+| `supabase-cleanup.sql` | 定时自动清理脚本（每天 12:00 / 24:00 自动删除房间与聊天记录，默认房间保留） |
+| `supabase-cleanup-manual.sql` | 手动清理脚本（想清理时随时执行，规则与定时版一致） |
 | `README.md` | 本文档 |
 
 ## 手机推送（Web Push）配置
@@ -147,6 +149,13 @@ delete from public.rooms where id = '房间号';
 **Q：想清空所有历史消息（例如清除早期测试数据）？**
 A：在 Supabase 控制台 SQL Editor 执行：
 `truncate table public.messages restart identity;`
+
+**Q：想每天定时自动删除所有房间与聊天记录？**
+A：已提供 `supabase-cleanup.sql`，在 SQL Editor 粘贴执行一次即可——之后每天 12:00 与 24:00（北京时间）由 pg_cron 自动清理：清空所有消息（含默认房间），删除除默认房间 `zhehaya-chat` 外的所有房间与推送订阅。验证：
+```sql
+select jobid, jobname, schedule, active from cron.job;
+```
+（需看到 `cleanup-noon` 与 `cleanup-midnight` 两条任务；pg_cron 用 UTC，东八区已换算为 `0 4 * * *` 和 `0 16 * * *`。）
 
 **Q：能看到历史消息，但新消息不实时刷新？**
 A：Realtime 未开启。在控制台 SQL Editor 执行：
