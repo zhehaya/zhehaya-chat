@@ -542,6 +542,8 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.17 02:40 <b>后台回来自动重连</b>（修复手机切后台后收不到新消息/看不到新进房者的下行失效问题）<br />
+            // 8.17 02:10 <b>全面加固</b>（麦克风/摄像头意外断开自动恢复、视频兼容 Safari、修复加轨异常导致的人数冻结）<br />
             // 8.17 01:40 <b>修复语音/视频偶发中断</b>（ICE 候选竞态丢失 + 断线自动重建 + 15 秒心跳自愈）<br />
             // 8.17 01:10 <b>修复人数/语音数显示错误</b>（离开者残留、重进后听不到/看不到对方的问题）<br />
             // 8.17 00:40 <b>开麦 / 开摄像头稳定性</b>（修复偶发权限获取失败：约束降级 + 自动重试 + 防连点）<br />
@@ -614,7 +616,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.20-iceretry";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.22-rejoin";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -874,6 +876,12 @@
           }
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           setConn(false, "[连接: 异常]");
+        } else if (status === "CLOSED") {
+          // SDK 自动重连失败时手动重建（后台标签页/手机锁屏后下行静默死亡的兜底）
+          setConn(false, "[连接: 断开]");
+          setTimeout(() => {
+            if (channel && channel.state !== "joined") rejoinChannel();
+          }, 3000);
         }
       });
 
@@ -910,7 +918,26 @@
         // 每 15 秒刷新一次 presence：在线状态保活，同时驱动双方周期性同步，
         // 让失效的对等连接能被自动重建（断线自愈）
         setInterval(() => { updatePresence(); }, 15000);
+        // 每 5 秒巡检本地麦克风/摄像头轨道是否意外终止（设备拔出等），自动恢复
+        setInterval(() => { mediaWatch(); }, 5000);
       }
+    }
+
+    // 重建实时频道：后台标签页/手机锁屏期间，Realtime 下行可能被浏览器静默掐断
+    // （上行正常、socket 仍显示 open），回前台或检测到 CLOSED 时全量重建订阅恢复下行
+    let rejoining = false;
+    function rejoinChannel() {
+      if (rejoining || !sb || !currentRoomId) return;
+      rejoining = true;
+      try {
+        if (channel) {
+          try { channel.untrack(); } catch {}
+          try { channel.unsubscribe(); } catch {}
+          try { sb.removeChannel(channel); } catch {}
+        }
+        initSupabase(); // 重新创建频道并订阅（joinedOnce=true 时只补消息不重复提示）
+      } catch {}
+      setTimeout(() => { rejoining = false; }, 3000);
     }
 
     // 会话过期 / 令牌被拒时，清除会话并回到登录页
@@ -997,9 +1024,11 @@
       for (const [uid, metas] of Object.entries(state)) {
         if (uid !== MY_UID) {
           // 与房间内其他人预留连接；谁持有麦克风/摄像头谁发起 offer
-          const entry = ensurePeer(uid);
+          // 加 try 保护：任何意外都不能中断本次同步的人数统计与后续处理
+          let entry = null;
+          try { entry = ensurePeer(uid); } catch (err) { console.warn("ensurePeer failed", err); }
           const nick = metas[0] && metas[0].nickname;
-          if (nick) {
+          if (entry && nick) {
             entry.nickname = String(nick).slice(0, 16);
             const label = entry.videoTile && entry.videoTile.querySelector(".label");
             if (label) label.textContent = entry.nickname;
@@ -1061,9 +1090,17 @@
         };
         pc.onnegotiationneeded = () => makeOffer(uid, pc);
         pcMap.set(uid, entry);
-        // 已有麦克风 / 摄像头流则立即加轨：谁开麦 / 开摄像头谁负责发起 offer
-        if (localStream) pc.addTrack(localStream.getAudioTracks()[0], localStream);
-        if (localCamStream) pc.addTrack(localCamStream.getVideoTracks()[0], localCamStream);
+        // 已有麦克风 / 摄像头流则立即加轨：谁开麦 / 开摄像头谁负责发起 offer。
+        // 只加仍然存活的轨道：设备被拔出等导致轨道 ended 时 addTrack 会抛异常，
+        // 不加保护会把整个 presence 同步回调打断（人数冻结、连接不再新建）
+        if (localStream) {
+          const t = localStream.getAudioTracks().find((x) => x.readyState === "live");
+          if (t) { try { pc.addTrack(t, localStream); } catch {} }
+        }
+        if (localCamStream) {
+          const t = localCamStream.getVideoTracks().find((x) => x.readyState === "live");
+          if (t) { try { pc.addTrack(t, localCamStream); } catch {} }
+        }
         // 没有媒体轨的一方无法主动发起协商（如断线后重建的一方）：
         // 向对端请求重新发起 offer，让持麦克风/摄像头的一方恢复通话
         if (!localStream && !localCamStream) {
@@ -1110,16 +1147,22 @@
         const entry = ensurePeer(msg.from);
         if (entry && (localStream || localCamStream)) {
           const pc = entry.pc;
-          if (pc.signalingState === "stable") {
-            const iceRestart = !!pc.remoteDescription;
-            makeOffer(msg.from, pc, iceRestart ? { iceRestart: true } : undefined);
+          if (!pc.remoteDescription) {
+            // 刚为对端新建的连接：加轨触发的 onnegotiationneeded 会自动发 offer，
+            // 此处无需重复（否则会与自动 offer 撞车）；若已发 offer 却迟迟没应答，则重建
+            if (pc.signalingState !== "stable") {
+              closePeer(msg.from);
+              updatePresence();
+            }
+          } else if (pc.signalingState === "stable") {
+            // 老连接（远端已存在）：对端可能是断线重建，用 ICE 重启恢复
+            makeOffer(msg.from, pc, { iceRestart: true });
           } else {
             // 正在协商中：稍后补发
             setTimeout(() => {
               const cur = pcMap.get(msg.from);
-              if (cur && cur.pc.signalingState === "stable" && (localStream || localCamStream)) {
-                const iceRestart = !!cur.pc.remoteDescription;
-                makeOffer(msg.from, cur.pc, iceRestart ? { iceRestart: true } : undefined);
+              if (cur && cur.pc.remoteDescription && cur.pc.signalingState === "stable" && (localStream || localCamStream)) {
+                makeOffer(msg.from, cur.pc, { iceRestart: true });
               }
             }, 1500);
           }
@@ -1171,8 +1214,9 @@
 
     function onRemoteTrack(uid, ev) {
       const entry = pcMap.get(uid);
-      if (!entry || !ev.streams[0]) return;
-      const stream = ev.streams[0];
+      if (!entry) return;
+      // 旧版 Safari 的 ontrack 可能没有 streams：用轨道自己包一层流回退
+      const stream = ev.streams && ev.streams[0] ? ev.streams[0] : new MediaStream([ev.track]);
       if (ev.track.kind === "video") {
         // 对端视频轨：只接视频轨单独播放（声音仍走 audio 标签，避免重复出声）
         if (!entry.videoTile) {
@@ -1220,6 +1264,93 @@
       if (entry.videoTile) entry.videoTile.remove();
       pcMap.delete(uid);
       updateVideoBox();
+    }
+
+    // 把本地轨加到所有存活的对端连接（跳过已关闭的连接，防止 addTrack 抛错打断流程）
+    function addTrackToAllPeers(track, stream) {
+      for (const [, entry] of pcMap) {
+        const st = entry.pc.connectionState;
+        if (st === "closed" || st === "failed") continue;
+        try { entry.pc.addTrack(track, stream); } catch {}
+      }
+    }
+
+    // 麦克风恢复（轨道意外终止后重新采集并重新加轨）
+    let micRecovering = false;
+    async function recoverMic() {
+      if (!micOn || micRecovering) return;
+      micRecovering = true;
+      addSysTip("-- [!] 麦克风已断开，正在尝试自动恢复 --");
+      try {
+        const stream = await getUserMediaSafe(MIC_CONSTRAINTS);
+        const t = stream.getAudioTracks()[0];
+        if (!t) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
+        localStream = stream;
+        // 先移除各连接上已失效的旧音轨 sender，再加新轨（避免残留静音通道）
+        for (const [, entry] of pcMap) {
+          for (const sender of entry.pc.getSenders()) {
+            if (sender.track && sender.track.kind === "audio" && sender.track.readyState === "ended") {
+              try { entry.pc.removeTrack(sender); } catch {}
+            }
+          }
+        }
+        addTrackToAllPeers(t, stream);
+        watchMicTrack(t);
+        addSysTip("-- 麦克风已恢复 --");
+      } catch (err) {
+        // 恢复失败：重置开麦状态与按钮，等用户手动重开
+        console.error(err);
+        micOn = false;
+        localStream = null;
+        $("mic-btn").textContent = "[麦克风: OFF]";
+        $("mic-btn").classList.remove("on");
+        micErrTip(err);
+      } finally {
+        micRecovering = false;
+        await updatePresence();
+      }
+    }
+
+    function watchMicTrack(track) {
+      track.addEventListener("ended", () => { recoverMic(); });
+    }
+
+    // 摄像头轨道意外终止：清理状态并提示，避免「视频人数还在、画面已黑」
+    function camDeadCleanup() {
+      if (!camOn) return;
+      if (localCamStream) {
+        const tracks = localCamStream.getVideoTracks();
+        // 先从所有对端移除视频轨（触发重协商，让对端及时关闭画面窗口）
+        for (const [, entry] of pcMap) {
+          for (const track of tracks) {
+            const sender = entry.pc.getSenders().find((s) => s.track === track);
+            if (sender) { try { entry.pc.removeTrack(sender); } catch {} }
+          }
+        }
+        tracks.forEach((t) => t.stop());
+        localCamStream = null;
+      }
+      camOn = false;
+      if (localTile) { localTile.remove(); localTile = null; }
+      updateVideoBox();
+      $("cam-btn").textContent = "[摄像头: OFF]";
+      $("cam-btn").classList.remove("on");
+      addSysTip("-- [!] 摄像头已断开，请检查设备后重新开启 --");
+      updatePresence();
+    }
+
+    function watchCamTrack(track) {
+      track.addEventListener("ended", () => { camDeadCleanup(); });
+    }
+
+    // 轨道巡检：部分浏览器对本地 track.stop() / 设备拔出不派发 ended 事件，轮询兜底
+    function mediaWatch() {
+      if (micOn && localStream && localStream.getAudioTracks().every((t) => t.readyState === "ended")) {
+        recoverMic();
+      }
+      if (camOn && localCamStream && localCamStream.getVideoTracks().every((t) => t.readyState === "ended")) {
+        camDeadCleanup();
+      }
     }
 
     /* ---------- 媒体采集：多约束降级 + 单次重试（提高开麦/开摄像头成功率） ---------- */
@@ -1303,7 +1434,8 @@
           localStream = await getUserMediaSafe(MIC_CONSTRAINTS);
           const track = localStream.getAudioTracks()[0];
           if (!track) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
-          for (const [, entry] of pcMap) entry.pc.addTrack(track, localStream);
+          addTrackToAllPeers(track, localStream);
+          watchMicTrack(track); // 轨道意外终止时自动恢复
           micOn = true;
         } catch (err) {
           console.error(err);
@@ -1429,7 +1561,8 @@
           localCamStream = await getUserMediaSafe(CAM_CONSTRAINTS);
           const track = localCamStream.getVideoTracks()[0];
           if (!track) throw Object.assign(new Error("no video track"), { name: "NotFoundError" });
-          for (const [, entry] of pcMap) entry.pc.addTrack(track, localCamStream);
+          addTrackToAllPeers(track, localCamStream);
+          watchCamTrack(track); // 摄像头意外断开时自动清理
           camOn = true;
           showLocalVideo();
         } catch (err) {
@@ -1880,6 +2013,8 @@
         document.title = baseTitle;
         // 实时连接在后台可能被浏览器掐断，回来后拉一次最新消息
         if (sb && currentRoomId) refreshHistory();
+        // 重建实时频道，确保能收到新消息、新加入者与信令（下行恢复自愈）
+        rejoinChannel();
       }
     });
 
