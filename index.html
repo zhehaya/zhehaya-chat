@@ -124,6 +124,13 @@
     .btn:hover, .btn:active { background: var(--fg); color: var(--btn-hover-text); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .download-btn {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+    }
+    .download-btn:hover { color: var(--btn-hover-text); }
+
     .theme-btn {
       padding: 4px 10px;
       border: 1px solid var(--border);
@@ -556,6 +563,7 @@
       </div>
       <div id="login-error" class="error-tip hidden">* 拒绝访问 — 房间密码错误</div>
       <button id="login-btn" class="btn">[ 进入 ]</button>
+      <a id="apk-download-btn" class="btn download-btn" href="zhechat.apk" download="zhechat.apk">[ 下载软件(仅限安卓) ]</a>
 
       <div class="footer-note">
          房间号不存在将自动创建（留空进默认房间）<br />
@@ -564,8 +572,9 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+             8.17 下午 <b>新增安卓客户端下载</b><br />
              <details class="upd-log sub">
-              <summary> 8.17 上午<b>视频通话</b>（摄像头开关 / 实时画面 / 视频窗收起展开）（点击展开详情）</summary>
+              <summary> 8.17 上午 <b>视频通话</b>（摄像头开关 / 实时画面 / 视频窗收起展开）（点击展开详情）</summary>
               <div class="upd-sub">
                 语音·视频双连接隔离：开视频不打断语音、关摄像头画面即时移除，不再卡住；断线自动重建；麦克风/摄像头意外断开自动恢复；兼容 Safari
               </div>
