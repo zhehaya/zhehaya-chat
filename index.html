@@ -542,6 +542,7 @@
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
+            // 8.17 01:40 <b>修复语音/视频偶发中断</b>（ICE 候选竞态丢失 + 断线自动重建 + 15 秒心跳自愈）<br />
             // 8.17 01:10 <b>修复人数/语音数显示错误</b>（离开者残留、重进后听不到/看不到对方的问题）<br />
             // 8.17 00:40 <b>开麦 / 开摄像头稳定性</b>（修复偶发权限获取失败：约束降级 + 自动重试 + 防连点）<br />
             // 8.17 00:25 <b>视频窗收起/展开</b>（一键收起或展开所有人的视频画面）<br />
@@ -613,7 +614,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.19-presence";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "v4.20-iceretry";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
@@ -906,6 +907,9 @@
         window.addEventListener("pagehide", () => {
           try { if (channel) channel.untrack(); } catch {}
         });
+        // 每 15 秒刷新一次 presence：在线状态保活，同时驱动双方周期性同步，
+        // 让失效的对等连接能被自动重建（断线自愈）
+        setInterval(() => { updatePresence(); }, 15000);
       }
     }
 
@@ -1025,31 +1029,71 @@
     function ensurePeer(uid) {
       if (uid === MY_UID) return null;
       let entry = pcMap.get(uid);
+      // 残留的已关闭/已失败连接不可用：先清理再重建，
+      // 否则新 offer 打在死连接上会抛错，对端永远等不到应答
+      if (entry && (entry.pc.connectionState === "closed" || entry.pc.connectionState === "failed")) {
+        closePeer(uid);
+        entry = null;
+      }
       if (!entry) {
         const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        entry = { pc, makingOffer: false, ignoreOffer: false, audioEl: null, videoEl: null, videoTile: null, nickname: "" };
+        entry = { pc, makingOffer: false, ignoreOffer: false, audioEl: null, videoEl: null, videoTile: null, nickname: "", pendingCandidates: [] };
         pc.onicecandidate = (e) => {
           if (e.candidate) sendSignal(uid, { candidate: e.candidate.toJSON() });
         };
         pc.ontrack = (e) => onRemoteTrack(uid, e);
         pc.onconnectionstatechange = () => {
-          if (pc.connectionState === "failed") closePeer(uid); // 断连后由 presence 同步重建
+          const st = pc.connectionState;
+          if (st === "failed" || st === "closed") {
+            // 连接彻底失效：关闭并触发 presence 同步，双方重新建连
+            closePeer(uid);
+            updatePresence();
+          } else if (st === "disconnected") {
+            // 给 ICE 自动恢复一个宽限期，超时仍断则重建
+            setTimeout(() => {
+              const cur = pcMap.get(uid);
+              if (cur && cur.pc === pc && pc.connectionState === "disconnected") {
+                closePeer(uid);
+                updatePresence();
+              }
+            }, 5000);
+          }
         };
         pc.onnegotiationneeded = () => makeOffer(uid, pc);
         pcMap.set(uid, entry);
         // 已有麦克风 / 摄像头流则立即加轨：谁开麦 / 开摄像头谁负责发起 offer
         if (localStream) pc.addTrack(localStream.getAudioTracks()[0], localStream);
         if (localCamStream) pc.addTrack(localCamStream.getVideoTracks()[0], localCamStream);
+        // 没有媒体轨的一方无法主动发起协商（如断线后重建的一方）：
+        // 向对端请求重新发起 offer，让持麦克风/摄像头的一方恢复通话
+        if (!localStream && !localCamStream) {
+          setTimeout(() => {
+            try { if (pcMap.get(uid)) sendSignal(uid, { pleaseOffer: true }); } catch {}
+          }, 300);
+        }
       }
       return entry;
     }
 
-    async function makeOffer(uid, pc) {
+    async function makeOffer(uid, pc, options) {
       if (pc.makingOffer) return;
       pc.makingOffer = true;
       try {
-        await pc.setLocalDescription(await pc.createOffer());
+        await pc.setLocalDescription(await pc.createOffer(options));
         sendSignal(uid, { description: descOf(pc.localDescription) });
+        // 应答看门狗：offer 发出去 10 秒后既未完成协商也未连通，
+        // 说明对端应答丢失（如信令竞态），关闭重建触发自愈
+        setTimeout(() => {
+          const cur = pcMap.get(uid);
+          if (
+            cur && cur.pc === pc &&
+            pc.signalingState !== "stable" &&
+            pc.connectionState !== "connected"
+          ) {
+            closePeer(uid);
+            updatePresence();
+          }
+        }, 10000);
       } catch (err) {
         console.warn("voice: offer failed", err);
       } finally {
@@ -1061,9 +1105,38 @@
     // 冲突时由非礼貌方忽略对方的 offer，礼貌方隐式回滚后应答，保证两端只走一条协商
     async function handleSignal(msg) {
       if (!msg || !msg.from || msg.to !== MY_UID) return;
+      // 对端请求重新发起 offer（对端无媒体轨、断线重建后）：由持媒体的一方重新协商
+      if (msg.pleaseOffer) {
+        const entry = ensurePeer(msg.from);
+        if (entry && (localStream || localCamStream)) {
+          const pc = entry.pc;
+          if (pc.signalingState === "stable") {
+            const iceRestart = !!pc.remoteDescription;
+            makeOffer(msg.from, pc, iceRestart ? { iceRestart: true } : undefined);
+          } else {
+            // 正在协商中：稍后补发
+            setTimeout(() => {
+              const cur = pcMap.get(msg.from);
+              if (cur && cur.pc.signalingState === "stable" && (localStream || localCamStream)) {
+                const iceRestart = !!cur.pc.remoteDescription;
+                makeOffer(msg.from, cur.pc, iceRestart ? { iceRestart: true } : undefined);
+              }
+            }, 1500);
+          }
+        }
+        return;
+      }
       const entry = ensurePeer(msg.from);
       if (!entry) return;
       const pc = entry.pc;
+      const flushCandidates = async () => {
+        const pend = entry.pendingCandidates.splice(0);
+        for (const c of pend) {
+          try { await pc.addIceCandidate(c); } catch (err) {
+            if (!entry.ignoreOffer) console.warn("voice: ice retry failed", err);
+          }
+        }
+      };
       try {
         if (msg.description) {
           const offerCollision =
@@ -1072,15 +1145,23 @@
           entry.ignoreOffer = MY_UID >= msg.from && offerCollision;
           if (entry.ignoreOffer) return;
           await pc.setRemoteDescription(msg.description);
+          // 候选可能比描述先到（信令是异步广播，有竞态）：
+          // 远端描述就绪后立即补加排队中的候选，避免 ICE 候选丢失导致连不通
+          await flushCandidates();
           if (msg.description.type === "offer") {
             await pc.setLocalDescription(await pc.createAnswer());
             sendSignal(msg.from, { description: descOf(pc.localDescription) });
           }
         } else if (msg.candidate) {
-          try {
-            await pc.addIceCandidate(msg.candidate);
-          } catch (err) {
-            if (!entry.ignoreOffer) console.warn("voice: ice failed", err);
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+              await pc.addIceCandidate(msg.candidate);
+            } catch (err) {
+              if (!entry.ignoreOffer) console.warn("voice: ice failed", err);
+            }
+          } else {
+            // 远端描述还没设置好：先排队，等 setRemoteDescription 后统一补加
+            entry.pendingCandidates.push(msg.candidate);
           }
         }
       } catch (err) {
