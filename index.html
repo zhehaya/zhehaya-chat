@@ -297,8 +297,8 @@
     .video-tile video {
       display: block;
       width: 100%;
-      aspect-ratio: 4 / 3;
-      object-fit: cover;
+      aspect-ratio: auto; /* 跟随视频真实比例，不再强制 4:3 */
+      object-fit: contain; /* 完整显示画面，避免裁掉人脸 */
       background: #000;
     }
     .video-tile.local video { transform: scaleX(-1); } /* 本地预览镜像 */
@@ -1103,10 +1103,12 @@
 
     function newSub() {
       return {
-        pc: new RTCPeerConnection({ iceServers: ICE_SERVERS }),
+        // iceCandidatePoolSize：提前收集 ICE 候选，缩短开摄像头后出画面的等待
+        pc: new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }),
         makingOffer: false,
         ignoreOffer: false,
         pendingCandidates: [],
+        discTimer: null, // disconnected 宽限定时器（恢复连接时撤销，防止堆积）
         el: null,
         tile: null,
       };
@@ -1127,6 +1129,22 @@
     }
     function liveVideoTrack() {
       return localCamStream ? (localCamStream.getVideoTracks().find((t) => t.readyState === "live") || null) : null;
+    }
+
+    // 网状拓扑下每路视频对每个对端独立编码，不限制码率时多人会打满上行。
+    // 给发送端设置每路码率 / 帧率上限（浏览器不支持 setParameters 时静默跳过）。
+    const VIDEO_MAX_BITRATE = 500_000; // 每路最高 500 kbps
+    const VIDEO_MAX_FPS = 24;
+    function capVideoSender(pc) {
+      try {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        if (!sender || typeof sender.setParameters !== "function") return;
+        const p = sender.getParameters();
+        if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+        p.encodings[0].maxBitrate = VIDEO_MAX_BITRATE;
+        p.encodings[0].maxFramerate = VIDEO_MAX_FPS;
+        sender.setParameters(p).catch(() => {});
+      } catch {}
     }
 
     // 创建/复用语音子连接。自己开麦则加轨（由 onnegotiationneeded 自动发起 offer），
@@ -1170,7 +1188,7 @@
         e.video = sub;
         const t = liveVideoTrack();
         if (t) {
-          try { sub.pc.addTrack(t, localCamStream); } catch {}
+          try { sub.pc.addTrack(t, localCamStream); capVideoSender(sub.pc); } catch {}
         } else {
           setTimeout(() => {
             try { if (pcMap.get(uid) && pcMap.get(uid).video) sendSignal(uid, { kind: "video", pleaseOffer: true }); } catch {}
@@ -1209,11 +1227,17 @@
     function handleSubState(uid, sub, kind) {
       const st = sub.pc.connectionState;
       const closeFn = kind === "audio" ? closeAudioPeer : closeVideoPeer;
+      // 恢复连接 / 正在重连时撤销宽限定时器，避免定时器堆积
+      if (sub.discTimer && st !== "disconnected") {
+        clearTimeout(sub.discTimer);
+        sub.discTimer = null;
+      }
       if (st === "failed" || st === "closed") {
         closeFn(uid);
         updatePresence();
       } else if (st === "disconnected") {
-        setTimeout(() => {
+        sub.discTimer = setTimeout(() => {
+          sub.discTimer = null;
           const e = pcMap.get(uid);
           if (e && e[kind] === sub && sub.pc.connectionState === "disconnected") {
             closeFn(uid);
@@ -1342,7 +1366,14 @@
         e.video.tile.append(e.video.el, label);
         $("video-box").appendChild(e.video.tile);
       }
-      e.video.el.srcObject = new MediaStream(stream.getVideoTracks());
+      // 仅在轨道变化时重设 srcObject：重协商等重复 ontrack 会导致 <video> 闪断重载
+      const curSrc = e.video.el.srcObject;
+      const sameTrack = curSrc && curSrc.getVideoTracks().some((t) => t === ev.track);
+      if (!sameTrack) {
+        e.video.el.srcObject = new MediaStream(stream.getVideoTracks());
+      }
+      // 视频窗收起期间新接入的轨道：保持禁用（与收起状态一致）
+      if (videoBoxCollapsed) ev.track.enabled = false;
       e.video.el.play().catch(() => {});
       updateVideoBox();
     }
@@ -1441,7 +1472,8 @@
       { audio: true }, // 降级：部分设备不支持上述约束
     ];
     const CAM_CONSTRAINTS = [
-      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } },
+      // 限帧率：降低手机功耗与上行带宽（与每路 maxBitrate 配合）
+      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } } },
       { video: true }, // 降级
     ];
 
@@ -1584,6 +1616,14 @@
 
     function toggleVideoPanel() {
       videoBoxCollapsed = !videoBoxCollapsed;
+      // 收起时停用接收端轨道（停止解码，省 CPU / 电量），展开时恢复；
+      // 只动远端接收轨，本地采集与预览不受影响
+      for (const e of pcMap.values()) {
+        if (!e.video || !e.video.pc) continue;
+        for (const r of e.video.pc.getReceivers()) {
+          if (r.track) r.track.enabled = !videoBoxCollapsed;
+        }
+      }
       updateVideoBox();
     }
 
@@ -1670,6 +1710,7 @@
               if (sub && !sub.pc.getSenders().some((s) => s.track === track) &&
                   sub.pc.connectionState !== "closed" && sub.pc.connectionState !== "failed") {
                 sub.pc.addTrack(track, localCamStream);
+                capVideoSender(sub.pc);
               }
             } catch {}
           }
@@ -2133,6 +2174,7 @@
       if (channel) sb.removeChannel(channel);
       for (const uid of Array.from(pcMap.keys())) { try { closePeer(uid); } catch {} }
       if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      if (localCamStream) localCamStream.getTracks().forEach((t) => t.stop());
     });
   </script>
 </body>
