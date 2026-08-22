@@ -13,7 +13,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = "https://bwcannjfisxpspmondbd.supabase.co"; // TODO: 你的项目 URL
 const TOKEN_TTL_SECONDS = 60 * 60; // 令牌有效期：1 小时
-const ROOM_ID_RE = /^[a-zA-Z0-9_-]{2,24}$/; // 房间号规则
+// 房间号规则：中英文 / 数字 / - / _（中文按 1 个字符计，总长 2-24）
+const ROOM_ID_RE = /^[a-zA-Z0-9\u4e00-\u9fa5_-]{2,24}$/;
 const PBKDF2_ITERATIONS = 100_000;
 
 const encoder = new TextEncoder();

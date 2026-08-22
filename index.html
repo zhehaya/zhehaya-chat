@@ -297,8 +297,8 @@
     .video-tile video {
       display: block;
       width: 100%;
-      aspect-ratio: auto; /* 跟随视频真实比例，不再强制 4:3 */
-      object-fit: contain; /* 完整显示画面，避免裁掉人脸 */
+      aspect-ratio: 16 / 9; /* 手机与电脑统一横屏比例 */
+      object-fit: cover; /* 填满窗口，画面居中裁切 */
       background: #000;
     }
     .video-tile.local video { transform: scaleX(-1); } /* 本地预览镜像 */
@@ -549,7 +549,7 @@
 
       <div class="field">
         <span class="icon">#</span>
-        <input id="room-input" type="text" placeholder="房间号(不存在将自动创建)" maxlength="24" autocomplete="off" />
+        <input id="room-input" type="text" placeholder="房间号(支持中文，不存在将自动创建)" maxlength="24" autocomplete="off" />
       </div>
 
       <div class="field">
@@ -650,7 +650,8 @@
     const APP_VERSION      = "v4.23-dualpc";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
-    const ROOM_ID_RE        = /^[a-zA-Z0-9_-]{2,24}$/;           // 房间号规则（与服务端一致）
+    // 房间号规则（与服务端一致）：中英文 / 数字 / - / _
+    const ROOM_ID_RE = /^[a-zA-Z0-9\u4e00-\u9fa5_-]{2,24}$/;
     // WebRTC 语音/视频 STUN；跨网络（手机流量等）连不通时需自建/租用 TURN 服务器，
     // 在下方数组中追加：{ urls: "turn:你的地址:3478", username: "...", credential: "..." }
     const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -774,7 +775,7 @@
       const roomId = ($("room-input").value.trim() || DEFAULT_ROOM).toLowerCase();
       if (!pwd) return;
       if (!ROOM_ID_RE.test(roomId)) {
-        showLoginError("* 房间号不合法 — 2-24 位字母 / 数字 / - / _");
+        showLoginError("* 房间号不合法 — 2-24 位中文 / 字母 / 数字 / - / _");
         $("room-input").focus();
         return;
       }
@@ -1025,7 +1026,6 @@
       $("video-panel-btn").textContent = "[视频窗: ON]";
       $("video-panel-btn").classList.remove("on");
       $("video-panel-btn").classList.add("hidden");
-      videoAutoCollapsed = false;
       $("send-btn").disabled = false;
       $("online-count").textContent = "0";
       $("voice-count").textContent = "0";
@@ -1364,6 +1364,8 @@
         const label = document.createElement("span");
         label.className = "label";
         label.textContent = e.nickname || ("peer_" + uid.slice(0, 4));
+        // 双击任意视频窗：收起 / 展开整个视频区域
+        e.video.tile.addEventListener("dblclick", () => toggleVideoPanel());
         e.video.tile.append(e.video.el, label);
         $("video-box").appendChild(e.video.tile);
       }
@@ -1628,38 +1630,6 @@
       updateVideoBox();
     }
 
-    /* ---------- 手机端输入时自动收起 / 退出输入自动恢复视频窗 ---------- */
-    // 仅粗指针设备（手机/平板）生效；手动收起过的（videoBoxCollapsed 已为 true）
-    // 不打标记，失焦时不会误开。
-    let videoAutoCollapsed = false; // 本次是否由输入焦点自动收起（失焦时据此恢复）
-    const isTouchDevice = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-    function setRemoteVideoEnabled(enabled) {
-      for (const e of pcMap.values()) {
-        if (!e.video || !e.video.pc) continue;
-        for (const r of e.video.pc.getReceivers()) {
-          if (r.track) r.track.enabled = enabled;
-        }
-      }
-    }
-    if (isTouchDevice) {
-      $("message-input").addEventListener("focus", () => {
-        if (!videoBoxCollapsed) {
-          videoAutoCollapsed = true;
-          videoBoxCollapsed = true;
-          setRemoteVideoEnabled(false); // 停止解码，键盘弹出时不被视频窗遮挡且省电
-          updateVideoBox();
-        }
-      });
-      $("message-input").addEventListener("blur", () => {
-        if (videoAutoCollapsed) {
-          videoAutoCollapsed = false;
-          videoBoxCollapsed = false;
-          setRemoteVideoEnabled(true);
-          updateVideoBox();
-        }
-      });
-    }
-
     function showLocalVideo() {
       if (!localTile && localCamStream) {
         localTile = document.createElement("div");
@@ -1672,6 +1642,8 @@
         const label = document.createElement("span");
         label.className = "label";
         label.textContent = "我";
+        // 双击本地预览窗同样可收起 / 展开视频区域
+        localTile.addEventListener("dblclick", () => toggleVideoPanel());
         localTile.append(v, label);
         $("video-box").appendChild(localTile);
         v.play().catch(() => {});
