@@ -652,9 +652,21 @@
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
     // 房间号规则（与服务端一致）：中英文 / 数字 / - / _
     const ROOM_ID_RE = /^[a-zA-Z0-9\u4e00-\u9fa5_-]{2,24}$/;
-    // WebRTC 语音/视频 STUN；跨网络（手机流量等）连不通时需自建/租用 TURN 服务器，
-    // 在下方数组中追加：{ urls: "turn:你的地址:3478", username: "...", credential: "..." }
-    const ICE_SERVERS       = [{ urls: "stun:stun.l.google.com:19302" }];
+    // WebRTC ICE 服务器：优先 P2P 直连（Google STUN），跨网络打洞失败时
+    // 自动回退到 Cloudflare 免费 TURN 中继（公司/校园网等严格 NAT 也能连通）。
+    // 中继会消耗带宽但保证可用；直连成功时完全不经过中继。
+    // 若 Cloudflare 凭据失效，可换 Metered.ca / 自建 coturn，把地址填到这里。
+    const ICE_SERVERS = [
+      {
+        urls: [
+          "turn:stun.cloudflare.com:3478?transport=udp",
+          "turn:stun.cloudflare.com:3478?transport=tcp",
+        ],
+        username: "user",
+        credential: "password",
+      },
+      { urls: "stun:stun.l.google.com:19302" },
+    ];
     // GIF 表情图库：由 gifs/list.js（扫描 gifs 文件夹自动生成）加载，无需改数据库。
     // 消息内容以 [gif:文件名] 形式存储，渲染时只认清单内的文件，杜绝任意链接注入。
     const GIF_LIST = window.GIF_LIST || [];
@@ -1250,6 +1262,7 @@
     }
 
     // 子连接状态变化：失败/关闭立即清理并触发重建；断连给 5 秒宽限
+    const rtcFailTipShown = new Set(); // 每个对端只提示一次连接失败，避免刷屏
     function handleSubState(uid, sub, kind) {
       const st = sub.pc.connectionState;
       const closeFn = kind === "audio" ? closeAudioPeer : closeVideoPeer;
@@ -1268,6 +1281,12 @@
         }
       }
       if (st === "failed" || st === "closed") {
+        // failed = ICE 无法打通（双方网络无法直连/中继也不可用），提示一次
+        if (st === "failed" && !rtcFailTipShown.has(uid)) {
+          rtcFailTipShown.add(uid);
+          addSysTip("-- [!] 与 peer_" + uid.slice(0, 4) + " 的" + (kind === "video" ? "视频" : "语音") +
+            "连接失败：双方网络无法直连（公司/校园网常见）。已启用免费中继重试，仍失败请检查防火墙 --");
+        }
         closeFn(uid);
         updatePresence();
       } else if (st === "disconnected") {
