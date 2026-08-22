@@ -952,6 +952,18 @@
         setInterval(() => { updatePresence(); }, 15000);
         // 每 5 秒巡检本地麦克风/摄像头轨道是否意外终止（设备拔出等），自动恢复
         setInterval(() => { mediaWatch(); }, 5000);
+        // 手机端音频解锁：iOS Safari 等要求音频播放必须在用户手势内"解锁"，
+        // 否则对端先开麦时本端 play() 被静默拦截 → 听不到声音。
+        // 首次任意点击/触摸时把所有远端音频元素静音播放一遍再还原。
+        const unlockAudio = () => {
+          document.querySelectorAll("#voice-box audio").forEach((a) => {
+            const muted = a.muted;
+            a.muted = true;
+            a.play().then(() => { a.muted = muted; }).catch(() => { a.muted = muted; });
+          });
+        };
+        document.addEventListener("click", unlockAudio, { once: false });
+        document.addEventListener("touchstart", unlockAudio, { once: false });
       }
     }
 
@@ -1104,8 +1116,7 @@
 
     function newSub() {
       return {
-        // iceCandidatePoolSize：提前收集 ICE 候选，缩短开摄像头后出画面的等待
-        pc: new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }),
+        pc: new RTCPeerConnection({ iceServers: ICE_SERVERS }),
         makingOffer: false,
         ignoreOffer: false,
         pendingCandidates: [],
@@ -1133,9 +1144,10 @@
     }
 
     // 网状拓扑下每路视频对每个对端独立编码，不限制码率时多人会打满上行。
-    // 给发送端设置每路码率 / 帧率上限（浏览器不支持 setParameters 时静默跳过）。
-    const VIDEO_MAX_BITRATE = 500_000; // 每路最高 500 kbps
-    const VIDEO_MAX_FPS = 24;
+    // 注意：必须在连接建立（connected）之后再设置编码参数——部分浏览器在
+    // 协商完成前调用 setParameters 会静默失效甚至导致画面异常（黑屏）。
+    const VIDEO_MAX_BITRATE = 250_000; // 每路最高 250 kbps（低分辨率足够清晰）
+    const VIDEO_MAX_FPS = 15;
     function capVideoSender(pc) {
       try {
         const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
@@ -1189,7 +1201,7 @@
         e.video = sub;
         const t = liveVideoTrack();
         if (t) {
-          try { sub.pc.addTrack(t, localCamStream); capVideoSender(sub.pc); } catch {}
+          try { sub.pc.addTrack(t, localCamStream); } catch {}
         } else {
           setTimeout(() => {
             try { if (pcMap.get(uid) && pcMap.get(uid).video) sendSignal(uid, { kind: "video", pleaseOffer: true }); } catch {}
@@ -1232,6 +1244,10 @@
       if (sub.discTimer && st !== "disconnected") {
         clearTimeout(sub.discTimer);
         sub.discTimer = null;
+      }
+      if (st === "connected") {
+        // 连接建立后再限制码率（协商前设置在部分浏览器会导致黑屏）
+        if (kind === "video") capVideoSender(sub.pc);
       }
       if (st === "failed" || st === "closed") {
         closeFn(uid);
@@ -1346,7 +1362,12 @@
         e.audio.el.autoplay = true;
         $("voice-box").appendChild(e.audio.el);
       }
-      e.audio.el.srcObject = new MediaStream(stream.getAudioTracks());
+      // 仅在轨道变化时重设 srcObject：重协商等重复 ontrack 会让声音短暂中断
+      const curSrc = e.audio.el.srcObject;
+      const sameTrack = curSrc && curSrc.getAudioTracks().some((t) => t === ev.track);
+      if (!sameTrack) {
+        e.audio.el.srcObject = new MediaStream(stream.getAudioTracks());
+      }
       e.audio.el.play().catch(() => {});
     }
 
@@ -1391,6 +1412,20 @@
       }
     }
 
+    // 清理各语音子连接上已终止（ended）的旧音轨 sender。
+    // 不清理的话，重新开麦 addTrack 后连接上会有两条音频通道，
+    // 部分浏览器会导致对方听不到声音或协商异常（幽灵发送器）。
+    function pruneDeadAudioSenders() {
+      for (const [, e] of pcMap) {
+        if (!e.audio) continue;
+        for (const sender of e.audio.pc.getSenders()) {
+          if (sender.track && sender.track.kind === "audio" && sender.track.readyState === "ended") {
+            try { e.audio.pc.removeTrack(sender); } catch {}
+          }
+        }
+      }
+    }
+
     // 麦克风恢复（轨道意外终止后重新采集并重新加轨）
     let micRecovering = false;
     async function recoverMic() {
@@ -1403,14 +1438,7 @@
         if (!t) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
         localStream = stream;
         // 先移除各语音子连接上已失效的旧音轨 sender，再加新轨（避免残留静音通道）
-        for (const [, e] of pcMap) {
-          if (!e.audio) continue;
-          for (const sender of e.audio.pc.getSenders()) {
-            if (sender.track && sender.track.kind === "audio" && sender.track.readyState === "ended") {
-              try { e.audio.pc.removeTrack(sender); } catch {}
-            }
-          }
-        }
+        pruneDeadAudioSenders();
         // 补建缺失的语音子连接，再把新轨加到全部语音连接
         for (const uid of Array.from(pcMap.keys())) {
           if (uid === MY_UID) continue;
@@ -1467,6 +1495,37 @@
       if (camOn && localCamStream && localCamStream.getVideoTracks().every((t) => t.readyState === "ended")) {
         camDeadCleanup();
       }
+      reviveVideoElements();
+    }
+
+    // 视频渲染看门狗：轨道活着但画面长时间无帧（黑屏）时，重绑 srcObject 并强制播放。
+    // 覆盖：自动播放被拦截、重协商后 <video> 停帧、收起/展开状态不同步等黑屏场景。
+    function reviveVideoElements() {
+      if (videoBoxCollapsed) return; // 收起状态本来就不渲染，跳过
+      const check = (el, tile) => {
+        if (!el || !el.srcObject) return;
+        const track = el.srcObject.getVideoTracks()[0];
+        if (!track || track.readyState !== "live") return;
+        if (track.muted && !el.readyState) return; // 尚未收到首帧，还在正常等待
+        // 有帧数据却暂停 / 停帧 → 尝试救活
+        if (el.paused || el.readyState < 2) {
+          el.play().catch(() => {});
+          return;
+        }
+        if (el.videoWidth === 0) {
+          // 重绑流触发解码器重启（仅一次，避免反复抖动）
+          if (!tile || !tile.dataset.reviving) {
+            if (tile) tile.dataset.reviving = "1";
+            el.srcObject = new MediaStream([track]);
+            el.play().catch(() => {});
+            setTimeout(() => { if (tile) delete tile.dataset.reviving; }, 5000);
+          }
+        }
+      };
+      if (localTile) check(localTile.querySelector("video"), localTile);
+      for (const e of pcMap.values()) {
+        if (e.video && e.video.tile) check(e.video.el, e.video.tile);
+      }
     }
 
     /* ---------- 媒体采集：多约束降级 + 单次重试（提高开麦/开摄像头成功率） ---------- */
@@ -1475,8 +1534,8 @@
       { audio: true }, // 降级：部分设备不支持上述约束
     ];
     const CAM_CONSTRAINTS = [
-      // 限帧率：降低手机功耗与上行带宽（与每路 maxBitrate 配合）
-      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } } },
+      // 低分辨率 + 限帧率：降低功耗与上行带宽，弱网下更不容易黑屏卡死
+      { video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 24 } } },
       { video: true }, // 降级
     ];
 
@@ -1557,6 +1616,8 @@
           const track = localStream.getAudioTracks()[0];
           if (!track) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
           micOn = true;
+          // 清理历史残留的失效音轨 sender（如上次恢复失败留下的幽灵通道）
+          pruneDeadAudioSenders();
           // 为所有对端建立语音子连接（新建的自动加轨发起 offer；已存在的补轨）
           for (const uid of Array.from(pcMap.keys())) {
             if (uid === MY_UID) continue;
@@ -1625,6 +1686,10 @@
         if (!e.video || !e.video.pc) continue;
         for (const r of e.video.pc.getReceivers()) {
           if (r.track) r.track.enabled = !videoBoxCollapsed;
+        }
+        // 展开时确保 <video> 恢复播放（部分浏览器禁用轨道后会停在暂停态）
+        if (!videoBoxCollapsed && e.video.el) {
+          try { e.video.el.play().catch(() => {}); } catch {}
         }
       }
       updateVideoBox();
@@ -1715,7 +1780,6 @@
               if (sub && !sub.pc.getSenders().some((s) => s.track === track) &&
                   sub.pc.connectionState !== "closed" && sub.pc.connectionState !== "failed") {
                 sub.pc.addTrack(track, localCamStream);
-                capVideoSender(sub.pc);
               }
             } catch {}
           }
