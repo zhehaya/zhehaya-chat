@@ -1025,6 +1025,7 @@
       $("video-panel-btn").textContent = "[视频窗: ON]";
       $("video-panel-btn").classList.remove("on");
       $("video-panel-btn").classList.add("hidden");
+      videoAutoCollapsed = false;
       $("send-btn").disabled = false;
       $("online-count").textContent = "0";
       $("voice-count").textContent = "0";
@@ -1625,6 +1626,38 @@
         }
       }
       updateVideoBox();
+    }
+
+    /* ---------- 手机端输入时自动收起 / 退出输入自动恢复视频窗 ---------- */
+    // 仅粗指针设备（手机/平板）生效；手动收起过的（videoBoxCollapsed 已为 true）
+    // 不打标记，失焦时不会误开。
+    let videoAutoCollapsed = false; // 本次是否由输入焦点自动收起（失焦时据此恢复）
+    const isTouchDevice = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    function setRemoteVideoEnabled(enabled) {
+      for (const e of pcMap.values()) {
+        if (!e.video || !e.video.pc) continue;
+        for (const r of e.video.pc.getReceivers()) {
+          if (r.track) r.track.enabled = enabled;
+        }
+      }
+    }
+    if (isTouchDevice) {
+      $("message-input").addEventListener("focus", () => {
+        if (!videoBoxCollapsed) {
+          videoAutoCollapsed = true;
+          videoBoxCollapsed = true;
+          setRemoteVideoEnabled(false); // 停止解码，键盘弹出时不被视频窗遮挡且省电
+          updateVideoBox();
+        }
+      });
+      $("message-input").addEventListener("blur", () => {
+        if (videoAutoCollapsed) {
+          videoAutoCollapsed = false;
+          videoBoxCollapsed = false;
+          setRemoteVideoEnabled(true);
+          updateVideoBox();
+        }
+      });
     }
 
     function showLocalVideo() {
