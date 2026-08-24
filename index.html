@@ -1716,7 +1716,7 @@
       micRecovering = true;
       addSysTip("-- [!] 麦克风已断开，正在尝试自动恢复 --");
       try {
-        const stream = await getUserMediaSafe(MIC_CONSTRAINTS);
+        const stream = await getUserMediaSafe(MIC_CONSTRAINTS, "android.permission.RECORD_AUDIO");
         const t = stream.getAudioTracks()[0];
         if (!t) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
         localStream = stream;
@@ -1821,7 +1821,9 @@
     // 依次尝试多组约束；设备被占用等瞬时错误等待后整体重试一轮。
     // 不再预查 permissions.query —— 部分浏览器会误报 denied 或抛错导致偶发失败，
     // 直接尝试 getUserMedia 更可靠（真被拒绝时浏览器不会弹窗、立即 reject）。
-    async function getUserMediaSafe(constraintsList, retryMs = 700) {
+    // androidPerm: 5+ App 下本次操作需要的安卓运行时权限（仅申请该权限，不牵连其他）；
+    // 用户同意过一次后记入 localStorage，之后不再重复询问，除非采集失败才重新申请。
+    async function getUserMediaSafe(constraintsList, androidPerm = null, retryMs = 700, permRetried = false) {
       if (!window.isSecureContext || !navigator.mediaDevices) {
         const err = new Error("media requires HTTPS or localhost");
         err.name = "SecurityError";
@@ -1829,17 +1831,27 @@
       }
       // 5+ App（HBuilderX）环境：WebView 不自动触发运行时权限弹窗，
       // 未授权时 getUserMedia 会抛 NotReadableError（表现为"设备被占用"），
-      // 因此采集前先主动申请 RECORD_AUDIO / CAMERA 运行时权限。
-      if (window.plus && plus.android) {
-        await new Promise((resolve) => {
-          plus.android.requestPermissions(
-            ["android.permission.RECORD_AUDIO", "android.permission.CAMERA"],
-            () => resolve(), // 已授权 / 用户处理完毕
-            () => resolve()  // 申请失败：继续走 getUserMedia，让真实错误透出
-          );
-        });
-        // 部分机型权限授予后状态未及时同步，稍等再采集可显著降低 NotReadableError
-        await new Promise((r) => setTimeout(r, 300));
+      // 因此采集前先主动申请本次操作需要的运行时权限（开麦只申请录音，开摄像头只申请相机）。
+      let permFlag = "";
+      if (window.plus && plus.android && androidPerm) {
+        permFlag = "zhehaya-perm-ok-" + androidPerm.split(".").pop();
+        let alreadyOk = false;
+        try { alreadyOk = localStorage.getItem(permFlag) === "1"; } catch {}
+        if (!alreadyOk) {
+          let granted = false;
+          await new Promise((resolve) => {
+            plus.android.requestPermissions(
+              [androidPerm],
+              () => { granted = true; resolve(); }, // 已授权 / 用户刚同意
+              () => resolve()                        // 用户拒绝 / 申请失败：继续走 getUserMedia，让真实错误透出
+            );
+          });
+          if (granted) {
+            try { localStorage.setItem(permFlag, "1"); } catch {}
+            // 部分机型权限授予后状态未及时同步，稍等再采集可显著降低 NotReadableError
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
       }
       let lastErr = null;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -1858,6 +1870,12 @@
               err.name === "NotFoundError" ||
               err.name === "SecurityError"
             ) throw err;
+            // 5+ App：跳过申请后仍报"设备被占用" —— 权限可能被系统回收，
+            // 清除"已同意"记录后重新申请一次（只重试一次，避免死循环）
+            if (err.name === "NotReadableError" && permFlag && !permRetried) {
+              try { localStorage.removeItem(permFlag); } catch {}
+              return getUserMediaSafe(constraintsList, androidPerm, retryMs, true);
+            }
             // NotReadableError / OverconstrainedError / AbortError 等瞬时错误：换约束或稍后重试
           }
         }
@@ -1905,7 +1923,7 @@
             }
             localStream = null;
           }
-          localStream = await getUserMediaSafe(MIC_CONSTRAINTS);
+          localStream = await getUserMediaSafe(MIC_CONSTRAINTS, "android.permission.RECORD_AUDIO");
           const track = localStream.getAudioTracks()[0];
           if (!track) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
           micOn = true;
@@ -1985,6 +2003,8 @@
       const panel = $("gif-panel");
       if (!panel.classList.contains("hidden")) return;
       panel.classList.remove("hidden");
+      // 仅在窄屏（≤640px，手机端）打开表情时收起视频窗；桌面端互不影响。
+      if (!window.matchMedia("(max-width: 640px)").matches) return;
       // 只记录并隐藏原本展开的视频窗；用户手动收起的视频窗不会在关闭表情时被打开。
       gifPanelHidVideo = !videoBoxCollapsed && !$("video-box").classList.contains("hidden");
       if (gifPanelHidVideo) $("video-box").classList.add("hidden");
@@ -2076,7 +2096,7 @@
             }
             localCamStream = null;
           }
-          localCamStream = await getUserMediaSafe(CAM_CONSTRAINTS);
+          localCamStream = await getUserMediaSafe(CAM_CONSTRAINTS, "android.permission.CAMERA");
           const track = localCamStream.getVideoTracks()[0];
           if (!track) throw Object.assign(new Error("no video track"), { name: "NotFoundError" });
           camOn = true;
