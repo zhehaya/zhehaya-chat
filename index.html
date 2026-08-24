@@ -123,6 +123,7 @@
     }
     .btn:hover, .btn:active { background: var(--fg); color: var(--btn-hover-text); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .secondary-btn { margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
 
     .download-btn {
       display: block;
@@ -142,6 +143,18 @@
       cursor: pointer;
     }
     .theme-btn:hover { border-color: var(--fg); color: var(--fg); }
+    .back-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg-dim);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+    }
+    .back-btn:hover { border-color: var(--fg); color: var(--fg); }
+    .my-rooms-actions { display: flex; align-items: center; gap: 8px; }
 
     .error-tip {
       margin-top: 12px;
@@ -173,6 +186,48 @@
       letter-spacing: 0.5px;
     }
     .footer-note b { color: var(--fg); font-weight: 600; }
+
+    .saved-rooms {
+      margin: 16px 0 2px;
+      border: 1px solid var(--border);
+      background: var(--field);
+    }
+    .saved-rooms.hidden { display: none; }
+    .my-rooms-card { min-height: 250px; }
+    .saved-rooms-empty {
+      margin: 28px 0 8px; text-align: center; color: var(--fg-dim);
+      font-size: 12px; line-height: 1.9;
+    }
+    .saved-rooms-empty.hidden { display: none; }
+    .saved-rooms-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--fg-dim); font-size: 11px; letter-spacing: 1px;
+    }
+    .saved-room-list { max-height: 154px; overflow-y: auto; }
+    .saved-room-item {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0; padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .saved-room-item:last-child { border-bottom: none; }
+    .saved-room-open {
+      flex: 1; min-width: 0; padding: 0; border: 0; background: transparent;
+      color: var(--fg); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .saved-room-open:hover { color: var(--warn); }
+    .saved-room-unread {
+      flex: 0 0 auto; min-width: 19px; padding: 1px 5px;
+      background: var(--danger); color: #fff; font-size: 10px; text-align: center;
+    }
+    .saved-room-remove, .save-room-btn {
+      padding: 4px 7px; border: 1px solid var(--border); background: transparent;
+      color: var(--fg-dim); font: inherit; font-size: 11px; cursor: pointer;
+    }
+    .saved-room-remove:hover, .save-room-btn:hover { border-color: var(--danger); color: var(--danger); }
+    .save-room-btn.saved { border-color: var(--fg-dim); color: var(--fg-dim); }
 
     /* 可点击展开的更新日志 */
     .upd-log { margin-top: 10px; }
@@ -297,8 +352,8 @@
     .video-tile video {
       display: block;
       width: 100%;
-      aspect-ratio: 4 / 3; /* 手机与电脑统一 4:3 比例 */
-      object-fit: cover; /* 填满窗口，画面居中裁切 */
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
       background: #000;
     }
     .video-tile.local video { transform: scaleX(-1); } /* 本地预览镜像 */
@@ -549,7 +604,7 @@
 
       <div class="field">
         <span class="icon">#</span>
-        <input id="room-input" type="text" placeholder="房间号(支持中文，不存在将自动创建)" maxlength="24" autocomplete="off" />
+        <input id="room-input" type="text" placeholder="房间号(不存在将自动创建)" maxlength="24" autocomplete="off" />
       </div>
 
       <div class="field">
@@ -563,18 +618,23 @@
       </div>
       <div id="login-error" class="error-tip hidden">* 拒绝访问 — 房间密码错误</div>
       <button id="login-btn" class="btn">[ 进入 ]</button>
+      <button id="my-rooms-btn" class="btn secondary-btn" type="button">[ 我的聊天室 ]</button>
       <a id="apk-download-btn" class="btn download-btn" href="zhechat.apk" download="zhechat.apk">[ 下载软件(仅限安卓) ]</a>
 
       <div class="footer-note">
-         房间号不存在将自动创建（留空进默认房间）<br />
+         房间号支持中英文、数字、-、_（不存在将自动创建；留空进默认房间）<br />
          密码在房间不存在时将为此房间密码<br />
          昵称留空随机生成 guest_xxxx<br />
         <details class="upd-log">
           <summary> 更新日志（点击展开）</summary>
           <div class="upd-body">
-             8.17 下午 <b>新增安卓客户端下载</b><br />
+        8.25 <b>音视频稳定性合并</b>（中文房间号 / 移动端音频解锁 / 视频自动播放与黑屏恢复 / 动态码率 / 协商重试）<br />
+        8.24 <b>已保存聊天室</b>（首页快捷入口 / 保存密码与会话令牌 / 一键进入 / 后台新消息未读提示）<br />
+        8.24 <b>App 返回键后台保活</b>（按返回键隐藏到后台，不退出房间和登录会话）<br />
+        8.24 <b>Web Push 修复</b>（改用静态 sw.js 注册，提升浏览器 / PWA 通知兼容性）<br />
+			 8.17 13.18上线<b>app</b>
              <details class="upd-log sub">
-              <summary> 8.17 上午 <b>视频通话</b>（摄像头开关 / 实时画面 / 视频窗收起展开）（点击展开详情）</summary>
+              <summary> 8.17 上午<b>视频通话</b>（摄像头开关 / 实时画面 / 视频窗收起展开）（点击展开详情）</summary>
               <div class="upd-sub">
                 语音·视频双连接隔离：开视频不打断语音、关摄像头画面即时移除，不再卡住；断线自动重建；麦克风/摄像头意外断开自动恢复；兼容 Safari
               </div>
@@ -592,6 +652,25 @@
           </div>
         </details>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= 我的聊天室 ================= -->
+  <div id="my-rooms-view" class="view hidden">
+    <div class="login-card my-rooms-card">
+      <div class="logo-row">
+        <div class="logo">#_</div>
+        <div class="my-rooms-actions">
+          <button class="theme-btn" type="button" title="切换明暗主题">[☾ 暗色]</button>
+          <button id="my-rooms-back-btn" class="back-btn" type="button">[ 返回主页面 ]</button>
+        </div>
+      </div>
+      <h1>我的聊天室</h1>
+      <p class="sub">本机已保存的房间 <span id="saved-room-count">0</span></p>
+      <section id="saved-rooms" class="saved-rooms" aria-label="已保存聊天室">
+        <div id="saved-room-list" class="saved-room-list"></div>
+      </section>
+      <p id="saved-rooms-empty" class="saved-rooms-empty hidden">暂无已保存聊天室<br />进入房间后点击 [保存房间] 即可添加。</p>
     </div>
   </div>
 
@@ -613,6 +692,7 @@
           <button id="mic-btn" class="mic-btn" title="开麦 / 闭麦">[麦克风: OFF]</button>
           <button id="cam-btn" class="mic-btn" title="开启 / 关闭摄像头">[摄像头: OFF]</button>
           <button id="video-panel-btn" class="mic-btn hidden" title="展开 / 收起所有人的视频画面">[视频窗: ON]</button>
+          <button id="save-room-btn" class="save-room-btn" title="保存或取消保存当前聊天室">[保存房间]</button>
           <button id="leave-btn" class="leave-btn">[离开]</button>
         </div>
       </header>
@@ -647,25 +727,18 @@
     const SUPABASE_ANON_KEY = "sb_publishable_skCrN6cJN6m5wx6XeZbdhg_A1TboP7R";                    // TODO: 换成你的 anon public key
     // 密码按房间各自设置：新房间用创建时的密码；已有房间用创建者设置的密码
     const ROOM_NAME         = "zhehaya chat";                    // 品牌显示名称
-    const APP_VERSION      = "v4.23-dualpc";                    // 页面版本（显示在登录页，用于排查缓存）
+    const APP_VERSION      = "app-v0.2内测";                    // 页面版本（显示在登录页，用于排查缓存）
     const DEFAULT_ROOM      = "zhehaya-chat";                    // 房间号留空时的默认房间
     const HISTORY_LIMIT     = 100;                                // 加载最近多少条消息
-    // 房间号规则（与服务端一致）：中英文 / 数字 / - / _
-    const ROOM_ID_RE = /^[a-zA-Z0-9\u4e00-\u9fa5_-]{2,24}$/;
-    // WebRTC ICE 服务器：优先 P2P 直连（Google STUN），跨网络打洞失败时
-    // 自动回退到 Cloudflare 免费 TURN 中继（公司/校园网等严格 NAT 也能连通）。
-    // 中继会消耗带宽但保证可用；直连成功时完全不经过中继。
-    // 若 Cloudflare 凭据失效，可换 Metered.ca / 自建 coturn，把地址填到这里。
+    // 房间号规则：中英文 / 数字 / - / _。服务端 chat-login 也需允许相同规则。
+    const ROOM_ID_RE        = /^[a-zA-Z0-9\u4e00-\u9fa5_-]{2,24}$/;
+    // WebRTC 公开 STUN：帮助不同 Wi‑Fi / 手机网络发现公网地址并建立 P2P 连接。
+    // 严格 NAT、公司/校园网或双方均为对称 NAT 时仍必须配置带凭据的 TURN 中继，
+    // 可在下方追加：{ urls: "turn:你的地址:3478", username: "...", credential: "..." }。
     const ICE_SERVERS = [
-      {
-        urls: [
-          "turn:stun.cloudflare.com:3478?transport=udp",
-          "turn:stun.cloudflare.com:3478?transport=tcp",
-        ],
-        username: "user",
-        credential: "password",
-      },
       { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
     ];
     // GIF 表情图库：由 gifs/list.js（扫描 gifs 文件夹自动生成）加载，无需改数据库。
     // 消息内容以 [gif:文件名] 形式存储，渲染时只认清单内的文件，杜绝任意链接注入。
@@ -720,8 +793,135 @@
     const lastRoom = localStorage.getItem("last-room") || "";
     if (lastRoom) $("room-input").value = lastRoom;
 
+    // 已保存聊天室仅保存在本设备；用户选择保存密码和会话令牌以便快速进入。
+    const SAVED_ROOMS_KEY = "zhehaya-saved-rooms";
+    function getSavedRooms() {
+      try {
+        const rooms = JSON.parse(localStorage.getItem(SAVED_ROOMS_KEY) || "[]");
+        return Array.isArray(rooms)
+          ? rooms.filter((r) => r && ROOM_ID_RE.test(r.roomId || "")).slice(0, 20)
+          : [];
+      } catch { return []; }
+    }
+
+    function setSavedRooms(rooms) {
+      try { localStorage.setItem(SAVED_ROOMS_KEY, JSON.stringify(rooms.slice(0, 20))); } catch {}
+      renderSavedRooms();
+      updateSaveRoomButton();
+    }
+
+    function isRoomSaved(roomId) {
+      return getSavedRooms().some((room) => room.roomId === roomId);
+    }
+
+    function renderSavedRooms() {
+      const rooms = getSavedRooms();
+      const panel = $("saved-rooms"), list = $("saved-room-list");
+      $("saved-room-count").textContent = String(rooms.length);
+      list.textContent = "";
+      panel.classList.toggle("hidden", rooms.length === 0);
+      $("saved-rooms-empty").classList.toggle("hidden", rooms.length !== 0);
+      rooms.forEach((room) => {
+        const item = document.createElement("div");
+        item.className = "saved-room-item";
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "saved-room-open";
+        const tokenUsable = isTokenValid(room.token || "");
+        open.textContent = "#" + room.roomId + (tokenUsable ? " [免密]" : room.password ? " [密码已存]" : "");
+        open.title = tokenUsable ? "直接进入 #" + room.roomId : "进入 #" + room.roomId;
+        open.addEventListener("click", () => {
+          openSavedRoom(room);
+        });
+        item.appendChild(open);
+        if (room.unread > 0) {
+          const unread = document.createElement("span");
+          unread.className = "saved-room-unread";
+          unread.textContent = room.unread > 99 ? "99+" : String(room.unread);
+          unread.title = room.unread + " 条未读消息";
+          item.appendChild(unread);
+        }
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "saved-room-remove";
+        remove.textContent = "[删]";
+        remove.title = "取消保存 #" + room.roomId;
+        remove.addEventListener("click", () => {
+          setSavedRooms(getSavedRooms().filter((saved) => saved.roomId !== room.roomId));
+        });
+        item.appendChild(remove);
+        list.appendChild(item);
+      });
+    }
+
+    function toggleSaveCurrentRoom() {
+      if (!currentRoomId) return;
+      const rooms = getSavedRooms();
+      const index = rooms.findIndex((room) => room.roomId === currentRoomId);
+      if (index >= 0) {
+        rooms.splice(index, 1);
+        addSysTip(`-- 已取消保存房间 [#${currentRoomId}] --`);
+      } else {
+        const password = $("password-input").value;
+        rooms.unshift({ roomId: currentRoomId, password, token: authToken, savedAt: Date.now(), unread: 0 });
+        addSysTip(`-- 已保存房间 [#${currentRoomId}]（密码和会话令牌仅保存在本机） --`);
+      }
+      setSavedRooms(rooms);
+    }
+
+    function updateSavedRoomCredentials(roomId, password, token) {
+      const rooms = getSavedRooms();
+      const room = rooms.find((saved) => saved.roomId === roomId);
+      if (!room) return;
+      room.password = password || room.password || "";
+      room.token = token || "";
+      room.savedAt = Date.now();
+      setSavedRooms(rooms);
+    }
+
+    function updateSaveRoomButton() {
+      const btn = $("save-room-btn");
+      if (!btn) return;
+      const saved = !!currentRoomId && isRoomSaved(currentRoomId);
+      btn.classList.toggle("saved", saved);
+      btn.textContent = saved ? "[已保存]" : "[保存房间]";
+      btn.title = saved ? "取消保存当前聊天室" : "保存当前聊天室";
+    }
+
+    function increaseSavedRoomUnread(roomId) {
+      const rooms = getSavedRooms();
+      const room = rooms.find((saved) => saved.roomId === roomId);
+      if (!room) return;
+      room.unread = Math.min(999, Number(room.unread || 0) + 1);
+      setSavedRooms(rooms);
+    }
+
+    function clearSavedRoomUnread(roomId) {
+      const rooms = getSavedRooms();
+      const room = rooms.find((saved) => saved.roomId === roomId);
+      if (!room || !room.unread) return;
+      room.unread = 0;
+      setSavedRooms(rooms);
+    }
+
+    renderSavedRooms();
+
     /* ---------- 登录 ---------- */
-    const loginView = $("login-view"), chatView = $("chat-view");
+    const loginView = $("login-view"), myRoomsView = $("my-rooms-view"), chatView = $("chat-view");
+
+    function showMyRooms() {
+      renderSavedRooms();
+      loginView.classList.add("hidden");
+      myRoomsView.classList.remove("hidden");
+    }
+
+    function hideMyRooms() {
+      myRoomsView.classList.add("hidden");
+      loginView.classList.remove("hidden");
+    }
+
+    $("my-rooms-btn").addEventListener("click", showMyRooms);
+    $("my-rooms-back-btn").addEventListener("click", hideMyRooms);
     let sb = null, channel = null; // 注意：不能命名为 supabase，会与 SDK 全局变量冲突
     const renderedIds = new Set();
     let isNearBottom = true;
@@ -740,6 +940,7 @@
     let micOn = false;       // 是否已开麦
     let camOn = false;       // 是否已开摄像头
     let videoBoxCollapsed = false; // 视频窗是否已收起（手动切换，不影响画面采集）
+    let gifPanelHidVideo = false;  // 表情面板是否临时隐藏了原本展开的视频窗
     let micBusy = false;      // 开麦申请进行中（防止连点并发弹权限）
     let camBusy = false;      // 开摄像头申请进行中
 
@@ -782,12 +983,40 @@
       el.classList.remove("hidden");
     }
 
+    async function openSavedRoom(room) {
+      if (!room || !ROOM_ID_RE.test(room.roomId || "")) return;
+      $("login-error").classList.add("hidden");
+      $("room-input").value = room.roomId;
+      // 优先使用仍有效的令牌，避免每次都发送密码。
+      if (isTokenValid(room.token || "")) {
+        authToken = room.token;
+        sessionStorage.setItem("room-token", authToken);
+        currentRoomId = getTokenPayload(authToken).room || room.roomId;
+        if (!myNickname) {
+          myNickname = genHandle();
+          localStorage.setItem("anon-nickname", myNickname);
+        }
+        localStorage.setItem("last-room", currentRoomId);
+        enterRoom();
+        return;
+      }
+      // 会话过期后自动回退到本机保存的密码重新认证。
+      if (room.password) {
+        $("password-input").value = room.password;
+        await tryLogin();
+        return;
+      }
+      $("password-input").value = "";
+      $("password-input").focus();
+      showLoginError("* 会话已过期 — 请输入房间密码");
+    }
+
     async function tryLogin() {
       const pwd = $("password-input").value;
-      const roomId = ($("room-input").value.trim() || DEFAULT_ROOM).toLowerCase();
+      const roomId = $("room-input").value.trim() || DEFAULT_ROOM;
       if (!pwd) return;
       if (!ROOM_ID_RE.test(roomId)) {
-        showLoginError("* 房间号不合法 — 2-24 位中文 / 字母 / 数字 / - / _");
+        showLoginError("* 房间号不合法 — 2-24 位中英文 / 数字 / - / _");
         $("room-input").focus();
         return;
       }
@@ -833,6 +1062,7 @@
           roomCreated = data.created === true;
           authToken = data.token;
           sessionStorage.setItem("room-token", authToken);
+          updateSavedRoomCredentials(currentRoomId, pwd, authToken);
           $("login-error").classList.add("hidden");
           enterRoom();
         }
@@ -858,11 +1088,14 @@
     /* ---------- 进入房间 ---------- */
     function enterRoom() {
       loginView.classList.add("hidden");
+      myRoomsView.classList.add("hidden");
       chatView.classList.remove("hidden");
       $("room-name").textContent = ROOM_NAME;
       $("room-tag").textContent = "#" + currentRoomId;
       baseTitle = ROOM_NAME + " #" + currentRoomId;
       document.title = baseTitle;
+      clearSavedRoomUnread(currentRoomId);
+      updateSaveRoomButton();
       // 进入聊天室即申请通知权限：允许才有后台提醒，拒绝/忽略则不提醒
       requestNotifyPermission();
       initSupabase();
@@ -894,6 +1127,7 @@
             renderMessage(payload.new); // 内部按 id 去重
             // 页面不在前台（其他标签页 / 窗口被遮挡或最小化 / 手机后台）时提示新消息
             if (!isPageActive() && payload.new.nickname !== myNickname) {
+              increaseSavedRoomUnread(currentRoomId);
               notifyMessage(payload.new);
             }
           }
@@ -905,7 +1139,7 @@
         if (status === "SUBSCRIBED") {
           setConn(true);
           await updatePresence();
-          // 注册 / 更新本设备的 Web Push 订阅（手机系统通知），幂等可重复调用
+          // 注册 / 更新本设备的 Web Push 订阅，幂等可重复调用。
           registerPush();
           if (!joinedOnce) {
             joinedOnce = true;
@@ -941,12 +1175,13 @@
         });
         // 离开房间：清除会话，回到登录页（可换房间）
         $("leave-btn").addEventListener("click", leaveRoom);
+        $("save-room-btn").addEventListener("click", toggleSaveCurrentRoom);
         $("mic-btn").addEventListener("click", toggleMic);
         $("cam-btn").addEventListener("click", toggleCam);
         $("video-panel-btn").addEventListener("click", toggleVideoPanel);
-        // GIF 表情面板：按本地图库清单生成选项，点选即发
-        $("gif-btn").addEventListener("click", () => $("gif-panel").classList.toggle("hidden"));
-        $("gif-close").addEventListener("click", () => $("gif-panel").classList.add("hidden"));
+        // GIF 表情面板打开时临时隐藏视频窗；关闭后仅恢复原本展开的视频窗。
+        $("gif-btn").addEventListener("click", toggleGifPanel);
+        $("gif-close").addEventListener("click", closeGifPanel);
         buildGifPanel();
         const list = $("msg-list");
         list.addEventListener("scroll", () => {
@@ -964,14 +1199,12 @@
         setInterval(() => { updatePresence(); }, 15000);
         // 每 5 秒巡检本地麦克风/摄像头轨道是否意外终止（设备拔出等），自动恢复
         setInterval(() => { mediaWatch(); }, 5000);
-        // 手机端音频解锁：iOS Safari 等要求音频播放必须在用户手势内"解锁"，
-        // 否则对端先开麦时本端 play() 被静默拦截 → 听不到声音。
-        // 首次任意点击/触摸时把所有远端音频元素静音播放一遍再还原。
+        // 手机端音频解锁：iOS Safari 等要求播放动作来自用户手势。
         const unlockAudio = () => {
-          document.querySelectorAll("#voice-box audio").forEach((a) => {
-            const muted = a.muted;
-            a.muted = true;
-            a.play().then(() => { a.muted = muted; }).catch(() => { a.muted = muted; });
+          document.querySelectorAll("#voice-box audio").forEach((audio) => {
+            const muted = audio.muted;
+            audio.muted = true;
+            audio.play().then(() => { audio.muted = muted; }).catch(() => { audio.muted = muted; });
           });
         };
         document.addEventListener("click", unlockAudio, { once: false });
@@ -1038,6 +1271,7 @@
       $("msg-list").innerHTML = "";
       $("message-input").textContent = "";
       $("gif-panel").classList.add("hidden");
+      gifPanelHidVideo = false;
       $("jump-btn").classList.add("hidden");
       $("mic-btn").textContent = "[麦克风: OFF]";
       $("mic-btn").classList.remove("on");
@@ -1054,6 +1288,7 @@
       $("online-count").textContent = "0";
       $("voice-count").textContent = "0";
       chatView.classList.add("hidden");
+      myRoomsView.classList.add("hidden");
       loginView.classList.remove("hidden");
       $("room-input").value = localStorage.getItem("last-room") || "";
       $("password-input").value = "";
@@ -1132,7 +1367,7 @@
         makingOffer: false,
         ignoreOffer: false,
         pendingCandidates: [],
-        discTimer: null, // disconnected 宽限定时器（恢复连接时撤销，防止堆积）
+        discTimer: null,
         el: null,
         tile: null,
       };
@@ -1155,33 +1390,30 @@
       return localCamStream ? (localCamStream.getVideoTracks().find((t) => t.readyState === "live") || null) : null;
     }
 
-    // 网状拓扑下每路视频对每个对端独立编码，不限制码率时多人会打满上行。
-    // 注意：必须在连接建立（connected）之后再设置编码参数——部分浏览器在
-    // 协商完成前调用 setParameters 会静默失效甚至导致画面异常（黑屏）。
-    const VIDEO_MIN_BITRATE = 200_000;   // 每路最低 200 kbps（与之前手机画质一致）
-    const VIDEO_MAX_BITRATE = 2_000_000; // 每路最高 2 Mbps（上行保护上限）
+    // 多人视频时每个对端都要单独编码，按实际画面规格限制单路上行，避免占满带宽。
+    const VIDEO_MIN_BITRATE = 200_000;
+    const VIDEO_MAX_BITRATE = 2_000_000;
     const VIDEO_MAX_FPS = 30;
-    // 按实际采集分辨率 / 帧率动态计算每路码率上限：
-    // 普通手机摄像头（320×240@15fps）≈ 200 kbps，省带宽；
-    // OBS 虚拟摄像头等高清源（1280×720@30fps）自动放宽到 ~2 Mbps，画面不糊。
     function dynamicMaxBitrate() {
-      const t = liveVideoTrack();
-      const s = (t && t.getSettings) ? t.getSettings() : {};
-      const w = s.width || 0, h = s.height || 0;
-      const fps = Math.min(s.frameRate || 15, VIDEO_MAX_FPS);
-      if (!w || !h) return VIDEO_MIN_BITRATE;
-      const kbps = Math.round((w * h * fps * 0.08) / 1000);
+      const track = liveVideoTrack();
+      const settings = track && track.getSettings ? track.getSettings() : {};
+      const width = settings.width || 0;
+      const height = settings.height || 0;
+      const fps = Math.min(settings.frameRate || 15, VIDEO_MAX_FPS);
+      if (!width || !height) return VIDEO_MIN_BITRATE;
+      const kbps = Math.round((width * height * fps * 0.08) / 1000);
       return Math.min(Math.max(kbps, VIDEO_MIN_BITRATE), VIDEO_MAX_BITRATE);
     }
+
     function capVideoSender(pc) {
       try {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+        const sender = pc.getSenders().find((item) => item.track && item.track.kind === "video");
         if (!sender || typeof sender.setParameters !== "function") return;
-        const p = sender.getParameters();
-        if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-        p.encodings[0].maxBitrate = dynamicMaxBitrate();
-        p.encodings[0].maxFramerate = VIDEO_MAX_FPS;
-        sender.setParameters(p).catch(() => {});
+        const params = sender.getParameters();
+        if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+        params.encodings[0].maxBitrate = dynamicMaxBitrate();
+        params.encodings[0].maxFramerate = VIDEO_MAX_FPS;
+        sender.setParameters(params).catch(() => {});
       } catch {}
     }
 
@@ -1262,30 +1494,24 @@
     }
 
     // 子连接状态变化：失败/关闭立即清理并触发重建；断连给 5 秒宽限
-    const rtcFailTipShown = new Set(); // 每个对端只提示一次连接失败，避免刷屏
+    const rtcFailTipShown = new Set();
     function handleSubState(uid, sub, kind) {
       const st = sub.pc.connectionState;
       const closeFn = kind === "audio" ? closeAudioPeer : closeVideoPeer;
-      // 恢复连接 / 正在重连时撤销宽限定时器，避免定时器堆积
       if (sub.discTimer && st !== "disconnected") {
         clearTimeout(sub.discTimer);
         sub.discTimer = null;
       }
-      if (st === "connected") {
-        // 连接建立后延迟再限制码率：协商前 / 刚连接时设置在部分浏览器会导致黑屏
-        if (kind === "video") {
-          setTimeout(() => {
-            const e2 = pcMap.get(uid);
-            if (e2 && e2.video && e2.video.pc === sub.pc) capVideoSender(sub.pc);
-          }, 800);
-        }
+      if (st === "connected" && kind === "video") {
+        setTimeout(() => {
+          const entry = pcMap.get(uid);
+          if (entry && entry.video && entry.video.pc === sub.pc) capVideoSender(sub.pc);
+        }, 800);
       }
       if (st === "failed" || st === "closed") {
-        // failed = ICE 无法打通（双方网络无法直连/中继也不可用），提示一次
         if (st === "failed" && !rtcFailTipShown.has(uid)) {
           rtcFailTipShown.add(uid);
-          addSysTip("-- [!] 与 peer_" + uid.slice(0, 4) + " 的" + (kind === "video" ? "视频" : "语音") +
-            "连接失败：双方网络无法直连（公司/校园网常见）。已启用免费中继重试，仍失败请检查防火墙 --");
+          addSysTip("-- [!] 与 peer_" + uid.slice(0, 4) + " 的" + (kind === "video" ? "视频" : "语音") + "连接失败，请检查双方网络或防火墙 --");
         }
         closeFn(uid);
         updatePresence();
@@ -1303,8 +1529,6 @@
 
     async function makeOffer(uid, sub, kind, options, tries = 0) {
       if (sub.makingOffer) return;
-      // 非 stable 状态（正在处理对端 offer / answer）时 createOffer 会抛错，
-      // 导致本地永远发不出 offer → 对端黑屏。延迟到 stable 再发。
       if (sub.pc.signalingState !== "stable") {
         if (tries < 8) setTimeout(() => makeOffer(uid, sub, kind, options, tries + 1), 500);
         return;
@@ -1405,21 +1629,33 @@
         e.audio.el.autoplay = true;
         $("voice-box").appendChild(e.audio.el);
       }
-      // 仅在轨道变化时重设 srcObject：重协商等重复 ontrack 会让声音短暂中断
-      const curSrc = e.audio.el.srcObject;
-      const sameTrack = curSrc && curSrc.getAudioTracks().some((t) => t === ev.track);
-      if (!sameTrack) {
-        e.audio.el.srcObject = new MediaStream(stream.getAudioTracks());
-      }
+      const currentStream = e.audio.el.srcObject;
+      const sameTrack = currentStream && currentStream.getAudioTracks().some((track) => track === ev.track);
+      if (!sameTrack) e.audio.el.srcObject = new MediaStream(stream.getAudioTracks());
       e.audio.el.play().catch(() => {});
     }
 
-    // 播放重试：自动播放被暂时拦截时稍后重试（静音的视频元素基本都能播放成功）
     function playVideoSafe(el, tries = 3) {
       if (!el) return;
       el.play().catch(() => {
         if (tries > 1) setTimeout(() => playVideoSafe(el, tries - 1), 300);
       });
+    }
+
+    // dblclick 在部分移动 WebView 不会触发；额外识别 350ms 内的两次触摸结束事件。
+    function enableVideoTileToggle(tile) {
+      tile.addEventListener("dblclick", () => toggleVideoPanel());
+      let lastTouchEnd = 0;
+      tile.addEventListener("touchend", (event) => {
+        const now = Date.now();
+        if (now - lastTouchEnd > 0 && now - lastTouchEnd < 350) {
+          event.preventDefault();
+          lastTouchEnd = 0;
+          toggleVideoPanel();
+          return;
+        }
+        lastTouchEnd = now;
+      }, { passive: false });
     }
 
     function onRemoteVideoTrack(uid, ev) {
@@ -1433,28 +1669,21 @@
         e.video.el = document.createElement("video");
         e.video.el.autoplay = true;
         e.video.el.playsInline = true;
-        // 关键：远端画面元素必须静音。视频子连接可能携带音轨，浏览器的
-        // 自动播放策略会阻止带声音的 <video> 自动播放 → 黑屏。
-        // 远端声音走语音子连接，这里静音不影响通话。
+        // 视频连接只渲染画面，声音走独立语音连接；静音可避免移动端自动播放拦截。
         e.video.el.muted = true;
-        e.video.el.setAttribute("muted", ""); // iOS Safari 需要属性形式才生效
+        e.video.el.setAttribute("muted", "");
         e.video.el.setAttribute("playsinline", "");
         const label = document.createElement("span");
         label.className = "label";
         label.textContent = e.nickname || ("peer_" + uid.slice(0, 4));
-        // 双击任意视频窗：收起 / 展开整个视频区域
-        e.video.tile.addEventListener("dblclick", () => toggleVideoPanel());
+        // 电脑双击或手机双触均可收起 / 展开整个视频区域。
+        enableVideoTileToggle(e.video.tile);
         e.video.tile.append(e.video.el, label);
         $("video-box").appendChild(e.video.tile);
       }
-      // 仅在轨道变化时重设 srcObject：重协商等重复 ontrack 会导致 <video> 闪断重载
-      const curSrc = e.video.el.srcObject;
-      const sameTrack = curSrc && curSrc.getVideoTracks().some((t) => t === ev.track);
-      if (!sameTrack) {
-        e.video.el.srcObject = new MediaStream(stream.getVideoTracks());
-      }
-      // 不再禁用接收轨道：禁用后若启用时机错开会造成永久黑屏，
-      // 收起时直接隐藏窗口即可，解码开销由浏览器自行节流。
+      const currentStream = e.video.el.srcObject;
+      const sameTrack = currentStream && currentStream.getVideoTracks().some((track) => track === ev.track);
+      if (!sameTrack) e.video.el.srcObject = new MediaStream(stream.getVideoTracks());
       playVideoSafe(e.video.el);
       updateVideoBox();
     }
@@ -1469,15 +1698,12 @@
       }
     }
 
-    // 清理各语音子连接上已终止（ended）的旧音轨 sender。
-    // 不清理的话，重新开麦 addTrack 后连接上会有两条音频通道，
-    // 部分浏览器会导致对方听不到声音或协商异常（幽灵发送器）。
     function pruneDeadAudioSenders() {
-      for (const [, e] of pcMap) {
-        if (!e.audio) continue;
-        for (const sender of e.audio.pc.getSenders()) {
+      for (const [, entry] of pcMap) {
+        if (!entry.audio) continue;
+        for (const sender of entry.audio.pc.getSenders()) {
           if (sender.track && sender.track.kind === "audio" && sender.track.readyState === "ended") {
-            try { e.audio.pc.removeTrack(sender); } catch {}
+            try { entry.audio.pc.removeTrack(sender); } catch {}
           }
         }
       }
@@ -1555,15 +1781,14 @@
       reviveVideoElements();
     }
 
-    // 视频渲染看门狗：轨道活着但画面长时间无帧（黑屏）时，重绑 srcObject 并强制播放。
-    // 覆盖：自动播放被拦截、重协商后 <video> 停帧、收起/展开状态不同步等黑屏场景。
+    // 视频渲染看门狗：移动 WebView 有时在正常解码时仍短暂报告 videoWidth=0。
+    // 因此这里只重绑流、重试播放，不自动关闭并重建连接，避免误判导致远端持续黑屏。
     function reviveVideoElements() {
-      if (videoBoxCollapsed) return; // 收起状态本来就不渲染，跳过
+      if (videoBoxCollapsed) return;
       const check = (el, tile, uid) => {
         if (!el || !el.srcObject) return;
         const track = el.srcObject.getVideoTracks()[0];
         if (!track || track.readyState !== "live") return;
-        // 暂停 / 未就绪 → 尝试播放
         if (el.paused || el.readyState < 2) {
           playVideoSafe(el);
           return;
@@ -1572,25 +1797,14 @@
           if (tile) delete tile.dataset.black;
           return;
         }
-        // 画面无帧（黑屏）：第一轮重绑流重启解码器；
-        // 仍无效（约 10 秒后）则重建这条视频连接，触发重新协商 —— 最终兜底
-        const n = parseInt(tile ? tile.dataset.black : "0", 10) + 1;
-        if (n === 1) {
-          if (tile) tile.dataset.black = "1";
-          el.srcObject = new MediaStream([track]);
-          playVideoSafe(el);
-        } else if (n >= 2 && uid) {
-          if (tile) delete tile.dataset.black;
-          console.warn("[video] 远端画面持续黑屏，重建连接", uid);
-          closeVideoPeer(uid);
-          try { ensureVideoPeer(uid); } catch {}
-        } else {
-          if (tile) tile.dataset.black = String(n);
-        }
+        // 保留原始视频流，避免重协商期间远端画面被清空；仅重新触发解码与播放。
+        if (tile) tile.dataset.black = "1";
+        el.srcObject = new MediaStream([track]);
+        playVideoSafe(el, 5);
       };
       if (localTile) check(localTile.querySelector("video"), localTile, null);
-      for (const [uid, e] of pcMap) {
-        if (e.video && e.video.tile) check(e.video.el, e.video.tile, uid);
+      for (const [uid, entry] of pcMap) {
+        if (entry.video && entry.video.tile) check(entry.video.el, entry.video.tile, uid);
       }
     }
 
@@ -1600,9 +1814,7 @@
       { audio: true }, // 降级：部分设备不支持上述约束
     ];
     const CAM_CONSTRAINTS = [
-      // 低分辨率 + 限帧率：降低功耗与上行带宽，弱网下更不容易黑屏卡死；
-      // 帧率上限放宽到 30，兼容 OBS 虚拟摄像头等内容分享源
-      { video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 24, max: 30 } } },
+      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } },
       { video: true }, // 降级
     ];
 
@@ -1614,6 +1826,20 @@
         const err = new Error("media requires HTTPS or localhost");
         err.name = "SecurityError";
         throw err;
+      }
+      // 5+ App（HBuilderX）环境：WebView 不自动触发运行时权限弹窗，
+      // 未授权时 getUserMedia 会抛 NotReadableError（表现为"设备被占用"），
+      // 因此采集前先主动申请 RECORD_AUDIO / CAMERA 运行时权限。
+      if (window.plus && plus.android) {
+        await new Promise((resolve) => {
+          plus.android.requestPermissions(
+            ["android.permission.RECORD_AUDIO", "android.permission.CAMERA"],
+            () => resolve(), // 已授权 / 用户处理完毕
+            () => resolve()  // 申请失败：继续走 getUserMedia，让真实错误透出
+          );
+        });
+        // 部分机型权限授予后状态未及时同步，稍等再采集可显著降低 NotReadableError
+        await new Promise((r) => setTimeout(r, 300));
       }
       let lastErr = null;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -1683,7 +1909,6 @@
           const track = localStream.getAudioTracks()[0];
           if (!track) throw Object.assign(new Error("no audio track"), { name: "NotFoundError" });
           micOn = true;
-          // 清理历史残留的失效音轨 sender（如上次恢复失败留下的幽灵通道）
           pruneDeadAudioSenders();
           // 为所有对端建立语音子连接（新建的自动加轨发起 offer；已存在的补轨）
           for (const uid of Array.from(pcMap.keys())) {
@@ -1748,13 +1973,32 @@
     function toggleVideoPanel() {
       videoBoxCollapsed = !videoBoxCollapsed;
       updateVideoBox();
-      // 展开时确保视频元素恢复播放（display:none 恢复后部分浏览器画面不刷新）
       if (!videoBoxCollapsed) {
-        for (const e of pcMap.values()) {
-          if (e.video && e.video.el) playVideoSafe(e.video.el);
+        for (const entry of pcMap.values()) {
+          if (entry.video && entry.video.el) playVideoSafe(entry.video.el);
         }
         if (localTile) playVideoSafe(localTile.querySelector("video"));
       }
+    }
+
+    function openGifPanel() {
+      const panel = $("gif-panel");
+      if (!panel.classList.contains("hidden")) return;
+      panel.classList.remove("hidden");
+      // 只记录并隐藏原本展开的视频窗；用户手动收起的视频窗不会在关闭表情时被打开。
+      gifPanelHidVideo = !videoBoxCollapsed && !$("video-box").classList.contains("hidden");
+      if (gifPanelHidVideo) $("video-box").classList.add("hidden");
+    }
+
+    function closeGifPanel() {
+      $("gif-panel").classList.add("hidden");
+      if (gifPanelHidVideo) updateVideoBox();
+      gifPanelHidVideo = false;
+    }
+
+    function toggleGifPanel() {
+      if ($("gif-panel").classList.contains("hidden")) openGifPanel();
+      else closeGifPanel();
     }
 
     function showLocalVideo() {
@@ -1771,8 +2015,8 @@
         const label = document.createElement("span");
         label.className = "label";
         label.textContent = "我";
-        // 双击本地预览窗同样可收起 / 展开视频区域
-        localTile.addEventListener("dblclick", () => toggleVideoPanel());
+        // 本地预览窗同样支持电脑双击和手机双触。
+        enableVideoTileToggle(localTile);
         localTile.append(v, label);
         $("video-box").appendChild(localTile);
         playVideoSafe(v);
@@ -2039,7 +2283,7 @@
         span.textContent = g.label;
         item.append(img, span);
         item.addEventListener("click", () => {
-          $("gif-panel").classList.add("hidden");
+          closeGifPanel();
           insertGif(id);
         });
         grid.appendChild(item);
@@ -2157,7 +2401,27 @@
       } catch {}
     }
 
-    // ---------- Web Push（手机系统通知，Service Worker） ----------
+    // ---------- 5+ App 返回键：后台保活 ----------
+    // 仅在 5+ 打包 App 中接管 Android 返回键：隐藏到后台但不销毁页面，
+    // 因此再次从任务列表打开时仍保留当前房间、会话和实时连接。
+    function enableAppBackToBackground() {
+      if (!window.plus || !plus.key || !plus.runtime) return;
+      plus.key.addEventListener("backbutton", () => {
+        try {
+          plus.webview.currentWebview().hide("auto");
+        } catch (e) {
+          console.warn("[app] 切换后台失败", e);
+        }
+      }, false);
+    }
+
+    if (window.plus) {
+      enableAppBackToBackground();
+    } else {
+      document.addEventListener("plusready", enableAppBackToBackground, { once: true });
+    }
+
+    // ---------- Web Push（浏览器 / PWA，Service Worker） ----------
     function urlBase64ToUint8Array(base64String) {
       const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
       const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -2178,8 +2442,8 @@
         return;
       }
       try {
-        console.log("[push] 注册 Service Worker...");
-        const reg = await navigator.serviceWorker.register("sw.js");
+        console.log("[push] 注册静态 Service Worker...");
+        const reg = await navigator.serviceWorker.register("./sw.js");
         let sub = await reg.pushManager.getSubscription();
         if (!sub) {
           console.log("[push] 申请推送订阅（浏览器会弹授权）...");
