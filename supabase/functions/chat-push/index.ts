@@ -35,12 +35,15 @@ const json = (body, status = 200) =>
   });
 
 // 解析房间令牌里的 room 声明（Verify JWT 开启时 Supabase 已校验签名）
+// 注意：payload 是 UTF-8 编码的 JSON，不能直接用 atob()（会把中文房间名解成乱码）。
 function jwtRoom(req) {
   try {
     const auth = req.headers.get("Authorization") || "";
     const token = auth.replace("Bearer ", "");
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(part)).room || "";
+    const bin = atob(part);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)).room || "";
   } catch {
     return "";
   }

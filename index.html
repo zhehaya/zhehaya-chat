@@ -951,10 +951,14 @@
     let audioCtx = null;       // 提示音 AudioContext
 
     // 解析 JWT 载荷（获取过期时间与绑定的房间号）
+    // 注意：payload 是 UTF-8 编码的 JSON（服务端用 TextEncoder 编码），
+    // 不能直接用 atob() —— atob 只解出 Latin-1 字节串，会把中文房间名解成乱码。
     function getTokenPayload(token) {
       try {
         const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-        return JSON.parse(atob(part));
+        const bin = atob(part);
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
       } catch {
         return null;
       }
